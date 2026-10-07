@@ -73,8 +73,24 @@ function office({ id, branch, people, priceNote, image }) {
     pricing: 'free',
     capacity: 1,
     maxPeople: 12,
-    calendarKeyword: '參觀',
+    calendarKeyword: '諮詢', // 跟公司設立諮詢共用同一位專人的時間
     topics: ['參觀獨立辦公室', '月租方案諮詢'],
+    schedule: { weekday: { open: Math.max(10, h.weekday.open), close: Math.min(17, h.weekday.close) }, weekend: null },
+  };
+}
+
+// 公司設立／工商登記諮詢：客人選館，寫入該館日曆（免費）
+function consult({ id, branch, image }) {
+  const h = HOURS[branch];
+  return {
+    id, branch, mode: 'consult', name: '公司設立・工商登記諮詢',
+    desc: '公司設立、工商登記、營業登記地址等問題，免費預約專人諮詢（到館或線上）。',
+    image,
+    pricing: 'free',
+    capacity: 1,
+    maxPeople: 5,
+    calendarKeyword: '諮詢',
+    topics: ['公司設立', '工商登記', '營業登記地址', '其他'],
     schedule: { weekday: { open: Math.max(10, h.weekday.open), close: Math.min(17, h.weekday.close) }, weekend: null },
   };
 }
@@ -154,18 +170,11 @@ export default {
       rate: 300, dayRate: 1500 }),
     office({ id: 'chongxue-office', branch: 'tnn-chongxue', people: '2–6', priceNote: '日租 $680 起、月租 $9,900 起', image: '/img/hj/chongxue-office.jpg' }),
 
-    // 公司設立／工商登記諮詢（不分館，免費）
-    {
-      id: 'consult', branch: null, mode: 'consult', name: '公司設立・工商登記諮詢',
-      desc: '公司設立、工商登記、營業登記地址等問題，免費預約專人諮詢（線上或到館）。',
-      image: '/img/meeting.svg',
-      pricing: 'free',
-      capacity: 1,
-      maxPeople: 5,
-      calendarEnv: 'GCAL_CONSULT', // ★ 不分館的諮詢寫入這本日曆
-      calendarKeyword: '諮詢',
-      topics: ['公司設立', '工商登記', '營業登記地址', '其他'],
-      schedule: { weekday: { open: 10, close: 17, slotMinutes: 60 }, weekend: null },
-    },
+    // 公司設立／工商登記諮詢（每館各一個，寫入該館日曆）
+    consult({ id: 'xinyi-consult', branch: 'tpe-xinyi', image: '/img/hj/xinyi-office.jpg' }),
+    consult({ id: 'dazhong-consult', branch: 'txg-dazhong', image: '/img/hj/dazhong-office.jpg' }),
+    consult({ id: 'dongning-consult', branch: 'tnn-dongning', image: '/img/hj/dongning-seat.jpg' }),
+    consult({ id: 'zhongshan-consult', branch: 'tnn-zhongshan', image: '/img/hj/zhongshan-office.jpg' }),
+    consult({ id: 'chongxue-consult', branch: 'tnn-chongxue', image: '/img/hj/chongxue-office.jpg' }),
   ],
 };

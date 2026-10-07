@@ -23,7 +23,7 @@ if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
   });
   process.env.GOOGLE_TOKEN_URL = `${ORIGIN}/__mock/google/token`;
   process.env.GOOGLE_API_BASE = `${ORIGIN}/__mock/google`;
-  for (const k of ['XINYI', 'DAZHONG', 'DONGNING', 'ZHONGSHAN', 'CHONGXUE', 'CONSULT']) {
+  for (const k of ['XINYI', 'DAZHONG', 'DONGNING', 'ZHONGSHAN', 'CHONGXUE']) {
     process.env['GCAL_' + k] ||= `hj-${k.toLowerCase()}@group.calendar.google.com`;
   }
 }
