@@ -14,4 +14,6 @@ function submitToECPay(form) {
   f.submit();
 }
 const money = (n) => 'NT$ ' + Number(n).toLocaleString('zh-TW');
-const hh = (h) => String(h).padStart(2, '0') + ':00';
+// 24 以上代表隔天，例如 26 → 隔日 02:00
+const hh = (h) => (h >= 24 ? '隔日 ' : '') + String(h % 24).padStart(2, '0') + ':00';
+const hhShort = (h) => String(h % 24).padStart(2, '0');

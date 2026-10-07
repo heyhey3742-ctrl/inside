@@ -4,43 +4,57 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Hour Jungle 預約</title>
-<meta name="theme-color" content="#1f6b46">
+<meta name="theme-color" content="#c96a43">
 <link rel="icon" href="/img/icon.svg">
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
+<header class="hero">
+  <div class="brand" id="brand">Hour Jungle</div>
+  <p>中山・線上預約</p>
+</header>
 <div class="wrap">
-  <header class="top">
-    <div class="logo">HJ</div>
-    <div><h1>Hour Jungle 中山</h1><small>線上預約・刷卡付款・電子發票</small></div>
-  </header>
   <div class="steps" id="steps"><span></span><span></span><span></span><span></span></div>
 
   <!-- 1. 地點 -->
   <section id="step1">
+    <div class="card venue" id="venue" style="margin-top:22px"></div>
     <h2>選擇地點</h2>
     <div id="locations"><div class="spinner"></div></div>
+    <p class="center" style="margin-top:18px"><a href="/my.html" class="muted">已經預約過？查詢入場密碼 →</a></p>
   </section>
 
   <!-- 2. 人數、日期、時段 -->
   <section id="step2" class="hidden">
-    <h2>人數與時段</h2>
+    <div class="q" style="margin-top:22px"><span class="qi">Q</span><span>什麼是時段計費制？</span></div>
+    <div class="card a">
+      <div class="lead">
+        <p>我們分成 <em>早 / 中 / 晚</em> 三個時段<br>可自由選擇<em>單時段</em>或<em>多時段</em>，一次付清👇</p>
+        <span class="ai">A</span>
+      </div>
+      <details class="prices" id="priceTable">
+        <summary>方案價目表</summary>
+        <div class="ptable" id="ptable"></div>
+      </details>
+    </div>
+
+    <h2>人數</h2>
     <div class="card">
-      <label style="margin-top:0">人數</label>
       <div class="stepper">
         <button type="button" id="peopleMinus" aria-label="減少">−</button>
         <output id="people">1</output>
         <button type="button" id="peoplePlus" aria-label="增加">＋</button>
       </div>
-      <p class="hint" id="peopleHint" style="margin:8px 0 0"></p>
+      <p class="hint" id="peopleHint" style="margin:10px 0 0"></p>
     </div>
+
+    <h2>日期與時段</h2>
     <div class="card">
-      <label style="margin-top:0">日期</label>
       <div class="dates" id="dates"></div>
       <div class="more-date">其他日期 <input type="date" id="datePicker"></div>
-      <label>時段　<span class="muted" style="font-size:13px">先點入場時間，再點最後一個小時</span></label>
-      <div class="slots" id="slots"></div>
-      <div class="legend"><span><i style="background:var(--brand)"></i>已選</span><span><i style="background:var(--full)"></i>額滿／已過</span></div>
+      <label>時段（可複選，需連續）</label>
+      <div class="periods" id="periods"></div>
+      <div class="combo-note hidden" id="comboNote"></div>
       <div class="time-summary">
         <div><small>入場時間</small><b id="tIn">—</b></div>
         <div><small>出場時間</small><b id="tOut">—</b></div>
@@ -52,7 +66,7 @@
   <section id="step3" class="hidden">
     <h2>聯絡資料</h2>
     <form class="card" id="form" autocomplete="on" onsubmit="return false">
-      <label for="name" style="margin-top:0">姓名</label>
+      <label for="name">姓名</label>
       <input id="name" name="name" autocomplete="name" required>
       <label for="phone">手機</label>
       <input id="phone" name="tel" type="tel" inputmode="tel" autocomplete="tel" placeholder="0912345678" required>
@@ -69,7 +83,7 @@
         <button type="button" data-v="company">公司統編</button>
         <button type="button" data-v="donate">捐贈</button>
       </div>
-      <div data-inv="personal"><p class="hint" style="margin:10px 0 0">發票存在綠界會員載具，開立後寄到你的 Email。</p></div>
+      <div data-inv="personal"><p class="hint" style="margin:12px 0 0">發票存在綠界會員載具，開立後寄到你的 Email。</p></div>
       <div data-inv="mobile" class="hidden">
         <label for="carrier">手機條碼</label>
         <input id="carrier" placeholder="/ABC1234" autocapitalize="characters" maxlength="8">
@@ -106,11 +120,12 @@
 <div class="bar">
   <div class="in">
     <button class="btn ghost hidden" id="back" type="button">上一步</button>
-    <div class="price"><span id="priceLabel">小計</span><b id="price">NT$ 0</b></div>
+    <div class="price"><span id="priceLabel">選擇地點開始預約</span><b id="price">NT$ 0</b></div>
     <button class="btn" id="next" type="button" disabled>下一步</button>
   </div>
 </div>
 
+<script src="/icons.js"></script>
 <script src="/pay.js"></script>
 <script src="/app.js"></script>
 </body>

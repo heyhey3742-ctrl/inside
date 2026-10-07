@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#c96a43">
+<link rel="icon" href="/img/icon.svg">
+<link rel="stylesheet" href="/app.css">
+<title>查詢預約</title>
+</head>
+<body>
+<header class="hero">
+  <div class="brand" id="brand">Hour Jungle</div>
+  <p>查詢入場密碼</p>
+</header>
+<div class="wrap">
+  <div id="recent" class="hidden" style="margin-top:22px">
+    <h2>這支手機的預約</h2>
+    <div id="recentList"></div>
+  </div>
+  <h2>用預約編號查詢</h2>
+  <form class="card" id="f">
+    <label for="oid">預約編號（在發票通知信的備註裡）</label>
+    <input id="oid" placeholder="HJ2610…" autocapitalize="characters" required>
+    <label for="tail">手機末三碼</label>
+    <input id="tail" inputmode="numeric" maxlength="3" required>
+    <p></p><button class="btn block">查詢</button>
+  </form>
+  <div id="error" class="error hidden"></div>
+  <a class="btn ghost block" href="/">回到首頁</a>
+</div>
+<script src="/icons.js"></script>
+<script src="/pay.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+$('#brand').innerHTML = icon('leaf') + 'Hour Jungle';
+$('#f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = $('#oid').value.trim().toUpperCase(), tail = $('#tail').value.trim();
+  const res = await fetch(`/api/order?id=${encodeURIComponent(id)}&phone=${encodeURIComponent(tail)}`);
+  if (res.ok) return location.href = '/success.html?id=' + id;
+  $('#error').textContent = '查無此預約，請確認預約編號與手機末三碼';
+  $('#error').classList.remove('hidden');
+});
+(async () => {
+  let ids = [];
+  try { ids = JSON.parse(localStorage.getItem('hj-bookings') || '[]'); } catch {}
+  const list = (await Promise.all(ids.map((id) => fetch('/api/order?id=' + id).then((r) => r.ok ? r.json() : null).catch(() => null))))
+    .filter((o) => o && o.status === 'paid');
+  if (!list.length) return;
+  $('#recent').classList.remove('hidden');
+  for (const o of list) {
+    const a = document.createElement('a');
+    a.className = 'card'; a.style.display = 'block'; a.style.color = 'inherit'; a.style.textDecoration = 'none';
+    a.href = '/success.html?id=' + o.id;
+    a.innerHTML = '<b></b><div class="muted" style="font-size:14px"></div>';
+    a.querySelector('b').textContent = `${o.date}・${o.locationName}・${o.periodLabel}`;
+    a.querySelector('div').textContent = `${o.id}　點我看入場密碼 →`;
+    $('#recentList').appendChild(a);
+  }
+})();
+</script>
+</body>
+</html>

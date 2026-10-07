@@ -1,25 +1,44 @@
 // 場地與營業設定：改價格、時段、地點都在這裡
 export const SITE_NAME = 'Hour Jungle 中山';
 
-export const OPEN_HOUR = 9;   // 09:00 開放
-export const CLOSE_HOUR = 21; // 21:00 結束（最後一格 20:00–21:00）
+// 場地介紹：首頁「場地介紹」區塊的內容，直接改文字即可
+export const VENUE = {
+  title: '無人自助共享空間',
+  intro: '安靜、舒適的自助工作空間。線上預約付款後取得入場密碼，到現場輸入密碼即可入場，全程不用排隊等櫃台。',
+  photos: ['/img/desk.svg', '/img/meeting.svg'],
+  features: [
+    { icon: 'key', text: '密碼自助入場' },
+    { icon: 'wifi', text: '高速 Wi‑Fi' },
+    { icon: 'plug', text: '每個座位都有插座' },
+    { icon: 'cup', text: '飲用水免費取用' },
+    { icon: 'clock', text: '07:00 – 隔日 02:00' },
+    { icon: 'nofood', text: '不供餐，可自備輕食' },
+  ],
+  steps: [
+    '選擇時段並線上付款',
+    '付款完成立即取得入場密碼',
+    '到現場在門口輸入密碼入場',
+    '時間快到了？可以直接加訂下一個時段，密碼不變',
+  ],
+  rules: [
+    '本空間為無人自助，不提供餐點',
+    '請保持安靜，通話請到走廊',
+    '離場前請帶走個人物品與垃圾',
+    '入場密碼僅限預約時段內使用，請勿轉傳',
+  ],
+};
+
 export const MAX_DAYS_AHEAD = 60; // 最多可預約幾天後
 export const HOLD_MINUTES = 20;   // 付款未完成時，時段先保留幾分鐘
 
+// 三個時段：end 超過 24 代表跨到隔天（26 = 隔日 02:00）
+export const PERIODS = [
+  { id: 'morning', name: '早上', start: 7, end: 12, icon: 'bird' },
+  { id: 'afternoon', name: '下午', start: 12, end: 18, icon: 'sun' },
+  { id: 'evening', name: '晚上', start: 18, end: 26, icon: 'moon' },
+];
+
 export const LOCATIONS = [
-  {
-    id: 'meeting',
-    name: '會議室',
-    desc: '6–8 人會議室，含大螢幕、白板、Wi‑Fi，適合會議、面試、小型講座。',
-    address: '台北市中山區',
-    mapUrl: 'https://www.google.com/maps/search/?api=1&query=Hour+Jungle+中山',
-    image: '/img/meeting.svg',
-    // perRoom：整間包場，一次只能一組；價格以「每小時」計
-    pricing: 'perRoom',
-    price: 500,
-    capacity: 1,
-    maxPeople: 8,
-  },
   {
     id: 'desk',
     name: '共享座位',
@@ -27,11 +46,38 @@ export const LOCATIONS = [
     address: '台北市中山區',
     mapUrl: 'https://www.google.com/maps/search/?api=1&query=Hour+Jungle+中山',
     image: '/img/desk.svg',
-    // perPerson：按人頭計價；capacity 是同時段最多座位數
+    // perPerson：每人計價；capacity 是每個時段最多幾個座位
     pricing: 'perPerson',
-    price: 100,
     capacity: 20,
     maxPeople: 10,
+    prices: {
+      single: { morning: 130, afternoon: 180, evening: 160 },
+      combos: {
+        'morning+afternoon': 250,
+        'afternoon+evening': 250,
+        'morning+afternoon+evening': 300,
+      },
+    },
+  },
+  {
+    id: 'meeting',
+    name: '會議室',
+    desc: '6–8 人會議室，含大螢幕、白板、Wi‑Fi，適合會議、面試、小型講座。',
+    address: '台北市中山區',
+    mapUrl: 'https://www.google.com/maps/search/?api=1&query=Hour+Jungle+中山',
+    image: '/img/meeting.svg',
+    // perRoom：整間包場，價格不看人數，同時段只能一組（價格為示意，請換成實際價格）
+    pricing: 'perRoom',
+    capacity: 1,
+    maxPeople: 8,
+    prices: {
+      single: { morning: 1000, afternoon: 1200, evening: 1000 },
+      combos: {
+        'morning+afternoon': 2000,
+        'afternoon+evening': 2000,
+        'morning+afternoon+evening': 2800,
+      },
+    },
   },
 ];
 
@@ -44,8 +90,24 @@ export function unitsFor(loc, people) {
   return loc.pricing === 'perRoom' ? 1 : people;
 }
 
-export function priceFor(loc, hours, people) {
-  return loc.pricing === 'perRoom' ? loc.price * hours : loc.price * hours * people;
+// 把選到的時段整理成固定順序，並確認是連續的（早＋晚不行）
+export function normalizePeriods(ids) {
+  const idx = [...new Set(ids)].map((id) => PERIODS.findIndex((p) => p.id === id)).sort((a, b) => a - b);
+  if (!idx.length || idx.includes(-1)) return null;
+  for (let i = 1; i < idx.length; i++) if (idx[i] !== idx[i - 1] + 1) return null;
+  return idx.map((i) => PERIODS[i].id);
+}
+
+// 單價（每人或每間）
+export function unitPrice(loc, periods) {
+  if (periods.length === 1) return loc.prices.single[periods[0]];
+  return loc.prices.combos[periods.join('+')];
+}
+
+export function priceFor(loc, periods, people) {
+  const p = unitPrice(loc, periods);
+  if (p == null) return null;
+  return loc.pricing === 'perRoom' ? p : p * people;
 }
 
 const env = (k, d) => process.env[k] || d;

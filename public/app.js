@@ -1,7 +1,7 @@
 const $ = (s) => document.querySelector(s);
 const state = {
   cfg: null, step: 1, loc: null, people: 1, date: null,
-  slots: [], start: null, endSlot: null, invType: 'personal', busy: false,
+  avail: [], sel: [], invType: 'personal', busy: false,
 };
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -41,26 +41,60 @@ function go(step) {
 function units() {
   return state.loc.pricing === 'perRoom' ? 1 : state.people;
 }
-function hours() {
-  return state.start == null || state.endSlot == null ? 0 : state.endSlot + 1 - state.start;
+const PIDS = () => state.cfg.periods.map((p) => p.id);
+const periodOf = (id) => state.cfg.periods.find((p) => p.id === id);
+// 選到的時段，依早→中→晚排好
+function selected() {
+  return PIDS().filter((id) => state.sel.includes(id));
+}
+function unitPrice(loc, ids) {
+  if (!ids.length) return 0;
+  return ids.length === 1 ? loc.prices.single[ids[0]] : loc.prices.combos[ids.join('+')];
 }
 function amount() {
   if (!state.loc) return 0;
-  const h = hours() || 1;
-  return state.loc.pricing === 'perRoom' ? state.loc.price * h : state.loc.price * h * state.people;
+  const p = unitPrice(state.loc, selected());
+  if (!p) return 0;
+  return state.loc.pricing === 'perRoom' ? p : p * state.people;
+}
+function periodLabel(ids) {
+  if (ids.length === state.cfg.periods.length) return '全天';
+  return ids.map((id) => periodOf(id).name).join('＋');
+}
+function minPrice(loc) {
+  return Math.min(...Object.values(loc.prices.single));
 }
 
 function refreshBar() {
   const next = $('#next');
   let ok = false;
   if (state.step === 1) ok = !!state.loc;
-  else if (state.step === 2) ok = hours() > 0;
+  else if (state.step === 2) ok = amount() > 0;
   else ok = true;
   next.disabled = !ok || state.busy;
   $('#price').textContent = money(amount());
-  $('#priceLabel').textContent = state.loc
-    ? (hours() ? `${hours()} 小時` : '每小時') + (state.loc.pricing === 'perPerson' ? ` × ${state.people} 人` : '')
-    : '小計';
+  const ids = selected();
+  $('#priceLabel').textContent = !state.loc ? '選擇地點開始預約'
+    : !ids.length ? '請選擇時段'
+    : periodLabel(ids) + (state.loc.pricing === 'perPerson' ? ` × ${state.people} 人` : '・整間');
+}
+
+/* ---------- 場地介紹 ---------- */
+function renderVenue() {
+  const v = state.cfg.venue;
+  const box = $('#venue');
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  box.innerHTML = `
+    <div class="photos">${v.photos.map((src) => `<img src="${esc(src)}" alt="" loading="lazy">`).join('')}</div>
+    <div class="vbody">
+      <h3>場地介紹・${esc(v.title)}</h3>
+      <p class="vintro">${esc(v.intro)}</p>
+      <div class="feat">${v.features.map((f) => `<div>${icon(f.icon)}${esc(f.text)}</div>`).join('')}</div>
+      <details><summary class="muted" style="cursor:pointer;margin-top:12px;font-size:14px">入場流程與使用規則</summary>
+        <h4>入場流程</h4><ol>${v.steps.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
+        <h4>使用規則</h4><ul>${v.rules.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
+      </details>
+    </div>`;
 }
 
 /* ---------- 1. 地點 ---------- */
@@ -72,11 +106,11 @@ function renderLocations() {
     b.className = 'card loc' + (state.loc?.id === loc.id ? ' sel' : '');
     b.setAttribute('role', 'button');
     b.tabIndex = 0;
-    const unit = loc.pricing === 'perRoom' ? '/ 小時' : '/ 人・小時';
+    const unit = loc.pricing === 'perRoom' ? '/ 間' : '/ 人';
     b.innerHTML = `
       <img src="${loc.image}" alt="">
       <div class="body">
-        <h3><span></span><b>${money(loc.price)} <small>${unit}</small></b></h3>
+        <h3><span></span><b>單時段 ${money(minPrice(loc))} 起 <small>${unit}</small></b></h3>
         <p class="desc"></p>
         <p>📍 <span class="addr"></span>　<a target="_blank" rel="noopener">查看地圖</a></p>
       </div>`;
@@ -94,6 +128,7 @@ function renderLocations() {
       }
       renderLocations();
       go(2);
+      renderPriceTable();
       loadSlots();
     };
     b.addEventListener('click', pick);
@@ -109,14 +144,14 @@ function renderPeople() {
   $('#peoplePlus').disabled = state.people >= state.loc.maxPeople;
   $('#peopleHint').textContent = state.loc.pricing === 'perRoom'
     ? `整間包場，最多 ${state.loc.maxPeople} 人，價格不因人數改變`
-    : `每人 ${money(state.loc.price)} / 小時，最多 ${state.loc.maxPeople} 人`;
+    : `按人數計費，一次最多 ${state.loc.maxPeople} 人`;
 }
 function changePeople(d) {
   state.people = Math.max(1, Math.min(state.loc.maxPeople, state.people + d));
   renderPeople();
   // 人數變多時，原本選的時段可能不夠位子
-  if (state.start != null && !rangeFits(state.start, state.endSlot)) clearTime();
-  renderSlots();
+  state.sel = state.sel.filter((id) => fits(id));
+  renderPeriods();
   refreshBar();
 }
 
@@ -146,74 +181,118 @@ function pickDate(iso) {
   loadSlots();
 }
 
+function renderPriceTable() {
+  const loc = state.loc;
+  const unit = loc.pricing === 'perRoom' ? '整間包場價格，不論人數' : '以上為每人價格';
+  const row = (label, price, ic = '') => `<div class="row"><span>${ic}${label}</span><b>$${price}</b></div>`;
+  const ps = state.cfg.periods;
+  let html = '<h4>單時段方案</h4>';
+  for (const p of ps) html += row(`${p.name} ${hhShort(p.start)}-${hhShort(p.end)}`, loc.prices.single[p.id], icon(p.icon));
+  html += '<h4 style="margin-top:22px">多時段方案</h4>';
+  for (const [k, v] of Object.entries(loc.prices.combos)) {
+    const ids = k.split('+');
+    const short = ids.map((id) => periodOf(id).name[0] === '下' ? '午' : periodOf(id).name[0]).join('+');
+    html += row(`${ids.length === ps.length ? '全天' : '雙時段'}（${short}）`, v);
+  }
+  html += `<p class="unit">${unit}</p>`;
+  $('#ptable').innerHTML = html;
+}
+
 async function loadSlots() {
   renderPeople();
   if (!state.date) { state.date = state.cfg.today; renderDates(); }
-  const box = $('#slots');
-  box.innerHTML = '<div class="spinner" style="grid-column:1/-1"></div>';
+  const box = $('#periods');
+  box.innerHTML = '<div class="spinner"></div>';
   try {
     const data = await api(`/api/availability?location=${state.loc.id}&date=${state.date}`);
     if (data.date !== state.date || data.location !== state.loc.id) return;
-    state.slots = data.slots;
-    renderSlots();
+    state.avail = data.periods;
+    state.sel = state.sel.filter((id) => fits(id));
+    renderPeriods();
   } catch (e) {
     box.innerHTML = '';
     showError(e.message);
   }
 }
 
-const slotFits = (s) => !s.past && s.remaining >= units();
-function slotAt(h) { return state.slots.find((s) => s.hour === h); }
-function rangeFits(a, b) {
-  for (let h = a; h <= b; h++) { const s = slotAt(h); if (!s || !slotFits(s)) return false; }
-  return true;
+function fits(id) {
+  const a = state.avail.find((x) => x.id === id);
+  return !!a && !a.past && a.remaining >= units();
 }
 
-function renderSlots() {
-  const box = $('#slots');
+function renderPeriods() {
+  const box = $('#periods');
   box.innerHTML = '';
-  if (state.slots.every((s) => !slotFits(s))) {
-    box.innerHTML = '<p class="muted" style="grid-column:1/-1;margin:0">這天已經沒有可預約的時段，請換一天 🙏</p>';
-  }
-  for (const s of state.slots.some(slotFits) ? state.slots : []) {
+  const ids = selected();
+  for (const p of state.cfg.periods) {
+    const a = state.avail.find((x) => x.id === p.id) || {};
+    const ok = fits(p.id);
     const b = document.createElement('button');
     b.type = 'button';
-    const ok = slotFits(s);
-    let cls = 'slot';
-    if (!ok) cls += ' full';
-    if (state.start != null) {
-      const end = state.endSlot ?? state.start;
-      if (s.hour === state.start || s.hour === end) cls += ' edge';
-      else if (s.hour > state.start && s.hour < end) cls += ' in';
-    }
-    b.className = cls;
+    b.className = 'period' + (ids.includes(p.id) ? ' sel' : '');
     b.disabled = !ok;
-    let sub = s.past ? '已過' : !ok ? '額滿' : state.loc.pricing === 'perRoom' ? '可預約' : `剩 ${s.remaining} 位`;
-    b.innerHTML = `${hh(s.hour)}<small>${sub}</small>`;
-    b.addEventListener('click', () => tapSlot(s.hour));
+    const status = a.past ? '已結束' : !ok ? '額滿' : state.loc.pricing === 'perRoom' ? '可預約' : `剩 ${a.remaining} 位`;
+    b.innerHTML = `${icon(p.icon)}<span class="n">${p.name}</span>
+      <span class="p">$${state.loc.prices.single[p.id]}<small>${status}</small></span>
+      <span class="t">${hh(p.start)} – ${hh(p.end)}</span>`;
+    b.setAttribute('aria-pressed', ids.includes(p.id));
+    b.addEventListener('click', () => togglePeriod(p.id));
     box.appendChild(b);
   }
-  $('#tIn').textContent = state.start != null ? hh(state.start) : '—';
-  $('#tOut').textContent = state.endSlot != null ? hh(state.endSlot + 1) : '—';
+  if (state.cfg.periods.every((p) => !fits(p.id))) {
+    box.insertAdjacentHTML('beforeend', '<p class="muted" style="margin:4px 0 0">這天已經沒有可預約的時段，請換一天 🙏</p>');
+  }
+  renderCombo();
 }
 
-function tapSlot(h) {
-  // 第一下＝入場；第二下（較晚的時段）＝最後一個小時；再點就重新選
-  if (state.start == null || state.endSlot !== state.start || h < state.start) {
-    state.start = h; state.endSlot = h;
-  } else if (h === state.start) {
-    // 同一格再點一次：維持 1 小時
-  } else if (rangeFits(state.start, h)) {
-    state.endSlot = h;
+function renderCombo() {
+  const ids = selected();
+  const note = $('#comboNote');
+  if (ids.length > 1) {
+    const sum = ids.reduce((s, id) => s + state.loc.prices.single[id], 0);
+    const price = unitPrice(state.loc, ids);
+    const per = state.loc.pricing === 'perPerson' ? '每人' : '';
+    note.innerHTML = `已套用<b>${periodLabel(ids)}方案${per} $${price}</b>${sum > price ? `，比分開買${per}省 $${sum - price}` : ''}`;
+    note.classList.remove('hidden');
   } else {
-    state.start = h; state.endSlot = h;
-    showError('中間有額滿的時段，已幫你從這個時間重新開始選');
-    setTimeout(() => showError(''), 2500);
+    note.classList.add('hidden');
   }
-  renderSlots();
+  $('#tIn').textContent = ids.length ? hh(periodOf(ids[0]).start) : '—';
+  $('#tOut').textContent = ids.length ? hh(periodOf(ids[ids.length - 1]).end) : '—';
+}
+
+function togglePeriod(id) {
+  const all = PIDS();
+  let sel = state.sel.includes(id) ? state.sel.filter((x) => x !== id) : [...state.sel, id];
+  let idx = all.filter((x) => sel.includes(x)).map((x) => all.indexOf(x));
+  // 取消中間的時段會斷開 → 只保留剛剛點的那一側
+  if (idx.length > 1 && idx[idx.length - 1] - idx[0] + 1 !== idx.length) {
+    if (!sel.includes(id)) {
+      const cut = all.indexOf(id);
+      sel = sel.filter((x) => all.indexOf(x) < cut);
+    } else {
+      // 早＋晚不連續 → 自動補成全天（中間時段要有空位）
+      const fill = all.slice(idx[0], idx[idx.length - 1] + 1);
+      if (fill.every(fits)) {
+        sel = fill;
+        flash(`早＋晚不連續，已幫你改成${periodLabel(fill)}方案`);
+      } else {
+        sel = [id];
+        flash('時段需要連續，中間的時段已額滿，已改為只選這個時段');
+      }
+    }
+  }
+  state.sel = sel;
+  renderPeriods();
   refreshBar();
 }
-function clearTime() { state.start = null; state.endSlot = null; }
+
+function flash(msg) {
+  showError(msg);
+  clearTimeout(flash.t);
+  flash.t = setTimeout(() => showError(''), 3000);
+}
+function clearTime() { state.sel = []; }
 
 /* ---------- 3. 聯絡、發票 ---------- */
 function pickInv(v) {
@@ -226,8 +305,7 @@ function collect() {
   return {
     location: state.loc.id,
     date: state.date,
-    start: state.start,
-    end: state.endSlot + 1,
+    periods: selected(),
     people: state.people,
     customer: {
       name: $('#name').value.trim(),
@@ -268,9 +346,9 @@ function renderSummary() {
   const rows = [
     ['地點', state.loc.name],
     ['日期', `${b.date}（週${WEEK[d.getUTCDay()]}）`],
-    ['入場', hh(b.start)],
-    ['出場', hh(b.end)],
-    ['時數', `${hours()} 小時`],
+    ['時段', periodLabel(b.periods)],
+    ['入場', hh(periodOf(b.periods[0]).start)],
+    ['出場', hh(periodOf(b.periods[b.periods.length - 1]).end)],
     ['人數', `${b.people} 人`],
     ['姓名', b.customer.name],
     ['Email', b.customer.email],
@@ -327,18 +405,20 @@ window.addEventListener('pageshow', (e) => {
 
 (async function init() {
   try {
+    $('#brand').innerHTML = icon('leaf') + 'Hour Jungle';
     state.cfg = await api('/api/config');
     $('#holdMin').textContent = state.cfg.holdMinutes;
     try {
       const c = JSON.parse(localStorage.getItem('hj-contact') || 'null');
       if (c) { $('#name').value = c.name || ''; $('#phone').value = c.phone || ''; $('#email').value = c.email || ''; }
     } catch {}
+    renderVenue();
     renderLocations();
     // QR code 可帶 ?loc=meeting 直接進到指定地點
     const pre = new URLSearchParams(location.search).get('loc');
     const loc = state.cfg.locations.find((l) => l.id === pre);
     renderDates();
-    if (loc) { state.loc = loc; renderLocations(); go(2); loadSlots(); }
+    if (loc) { state.loc = loc; renderLocations(); go(2); renderPriceTable(); loadSlots(); }
     else go(1);
   } catch (e) {
     $('#locations').innerHTML = '';

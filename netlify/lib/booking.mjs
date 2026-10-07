@@ -1,8 +1,8 @@
 // 預約核心邏輯：查空位、建立訂單、付款成功／失敗處理
 import crypto from 'node:crypto';
 import {
-  LOCATIONS, OPEN_HOUR, CLOSE_HOUR, MAX_DAYS_AHEAD, HOLD_MINUTES,
-  getLocation, unitsFor, priceFor,
+  LOCATIONS, PERIODS, VENUE, MAX_DAYS_AHEAD, HOLD_MINUTES,
+  getLocation, unitsFor, priceFor, normalizePeriods,
 } from './config.mjs';
 import { taipeiNow, daysBetween, isValidDate } from './time.mjs';
 import { orders, days, readJSON, updateJSON } from './db.mjs';
@@ -17,14 +17,19 @@ function isActive(b, now = Date.now()) {
   return b.status === 'paid' || (b.status === 'pending' && b.holdUntil > now);
 }
 
-export function hourlyUsage(dayDoc, excludeId) {
-  const used = {};
-  for (let h = OPEN_HOUR; h < CLOSE_HOUR; h++) used[h] = 0;
+export function periodUsage(dayDoc, excludeId) {
+  const used = Object.fromEntries(PERIODS.map((p) => [p.id, 0]));
   for (const b of dayDoc?.bookings || []) {
     if (b.id === excludeId || !isActive(b)) continue;
-    for (let h = b.start; h < b.end; h++) used[h] += b.units;
+    for (const pid of b.periods) used[pid] += b.units;
   }
   return used;
+}
+
+// 時段結束前都還能訂（現場掃 QR code 也能馬上預約）
+function isPast(date, period, now = taipeiNow()) {
+  if (date < now.date) return true;
+  return date === now.date && period.end <= 24 && now.hour >= period.end;
 }
 
 export async function availability(locId, date) {
@@ -32,14 +37,13 @@ export async function availability(locId, date) {
   if (!loc) throw new UserError('找不到這個地點');
   if (!isValidDate(date)) throw new UserError('日期格式錯誤');
   const dayDoc = await readJSON(days(), dayKey(locId, date));
-  const used = hourlyUsage(dayDoc);
+  const used = periodUsage(dayDoc);
   const now = taipeiNow();
-  const slots = [];
-  for (let h = OPEN_HOUR; h < CLOSE_HOUR; h++) {
-    const past = date < now.date || (date === now.date && h <= now.hour);
-    slots.push({ hour: h, remaining: past ? 0 : loc.capacity - used[h], past });
-  }
-  return { location: locId, date, capacity: loc.capacity, slots };
+  const periods = PERIODS.map((p) => {
+    const past = isPast(date, p, now);
+    return { id: p.id, remaining: past ? 0 : loc.capacity - used[p.id], past };
+  });
+  return { location: locId, date, capacity: loc.capacity, periods };
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -54,13 +58,11 @@ export function validateInput(body) {
   if (ahead < 0) throw new UserError('不能預約過去的日期');
   if (ahead > MAX_DAYS_AHEAD) throw new UserError(`最多只能預約 ${MAX_DAYS_AHEAD} 天內`);
 
-  const start = Number(body.start);
-  const end = Number(body.end);
-  if (!Number.isInteger(start) || !Number.isInteger(end) ||
-      start < OPEN_HOUR || end > CLOSE_HOUR || end <= start) {
-    throw new UserError('請選擇正確的入場與出場時間');
+  const periods = normalizePeriods(Array.isArray(body.periods) ? body.periods.map(String) : []);
+  if (!periods) throw new UserError('請選擇連續的時段（早＋晚請改選全天）');
+  for (const pid of periods) {
+    if (isPast(date, PERIODS.find((p) => p.id === pid), now)) throw new UserError('這個時段已經結束了');
   }
-  if (date === now.date && start <= now.hour) throw new UserError('這個時段已經過了');
 
   const people = Number(body.people);
   if (!Number.isInteger(people) || people < 1 || people > loc.maxPeople) {
@@ -99,17 +101,26 @@ export function validateInput(body) {
     invoice = { type: 'donate', loveCode };
   }
 
-  const hours = end - start;
+  const amount = priceFor(loc, periods, people);
+  if (!amount) throw new UserError('這個時段組合沒有提供，請改選其他時段');
+  const first = PERIODS.find((p) => p.id === periods[0]);
+  const last = PERIODS.find((p) => p.id === periods[periods.length - 1]);
   return {
-    loc, date, start, end, hours, people, customer, invoice,
+    loc, date, periods, people, customer, invoice, amount,
+    start: first.start,
+    end: last.end,
     units: unitsFor(loc, people),
-    amount: priceFor(loc, hours, people),
   };
 }
 
-const pad = (h) => String(h).padStart(2, '0') + ':00';
+const pad = (h) => (h >= 24 ? '隔日' : '') + String(h % 24).padStart(2, '0') + ':00';
 
-export async function createOrder(body) {
+export function periodLabel(periods) {
+  if (periods.length === PERIODS.length) return '全天';
+  return periods.map((id) => PERIODS.find((p) => p.id === id).name).join('＋');
+}
+
+export async function createOrder(body, { extendOf } = {}) {
   const v = validateInput(body);
   const id = 'HJ' + taipeiNow().date.replace(/-/g, '').slice(2) +
     crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -117,14 +128,14 @@ export async function createOrder(body) {
 
   // 先佔位：檢查每個小時都還有空位才寫入
   await updateJSON(days(), dayKey(v.loc.id, v.date), (doc) => {
-    const used = hourlyUsage(doc);
-    for (let h = v.start; h < v.end; h++) {
-      if (used[h] + v.units > v.loc.capacity) {
-        throw new UserError(`${pad(h)} 這個時段已經額滿，請改選其他時間`);
+    const used = periodUsage(doc);
+    for (const pid of v.periods) {
+      if (used[pid] + v.units > v.loc.capacity) {
+        throw new UserError(`${periodLabel([pid])}時段已經額滿，請改選其他時段`);
       }
     }
-    doc.bookings = doc.bookings.filter((b) => isActive(b) || b.status === 'paid');
-    doc.bookings.push({ id, start: v.start, end: v.end, units: v.units, status: 'pending', holdUntil });
+    doc.bookings = doc.bookings.filter((b) => isActive(b));
+    doc.bookings.push({ id, periods: v.periods, units: v.units, status: 'pending', holdUntil });
     return doc;
   }, { bookings: [] });
 
@@ -133,14 +144,15 @@ export async function createOrder(body) {
     location: v.loc.id,
     locationName: v.loc.name,
     date: v.date,
+    periods: v.periods,
     start: v.start,
     end: v.end,
-    hours: v.hours,
     people: v.people,
     amount: v.amount,
-    itemName: `${v.loc.name} ${v.date} ${pad(v.start)}-${pad(v.end)} ${v.people}人`,
+    itemName: `${v.loc.name} ${v.date} ${periodLabel(v.periods)} ${pad(v.start)}-${pad(v.end)} ${v.people}人`,
     customer: v.customer,
     invoice: v.invoice,
+    extendOf: extendOf || undefined,
     status: 'pending',
     attempts: 1,
     holdUntil,
@@ -158,15 +170,16 @@ export async function retryOrder(id) {
   const loc = getLocation(order.location);
   const holdUntil = Date.now() + HOLD_MINUTES * 60 * 1000;
   await updateJSON(days(), dayKey(order.location, order.date), (doc) => {
-    const used = hourlyUsage(doc, id);
-    for (let h = order.start; h < order.end; h++) {
-      if (used[h] + unitsFor(loc, order.people) > loc.capacity) {
+    const used = periodUsage(doc, id);
+    const units = unitsFor(loc, order.people);
+    for (const pid of order.periods) {
+      if (used[pid] + units > loc.capacity) {
         throw new UserError('很抱歉，這個時段剛被訂走了，請重新預約');
       }
     }
     const b = doc.bookings.find((x) => x.id === id);
     if (b) Object.assign(b, { status: 'pending', holdUntil });
-    else doc.bookings.push({ id, start: order.start, end: order.end, units: unitsFor(loc, order.people), status: 'pending', holdUntil });
+    else doc.bookings.push({ id, periods: order.periods, units, status: 'pending', holdUntil });
     return doc;
   }, { bookings: [] });
   return updateJSON(orders(), id, (o) => {
@@ -180,12 +193,14 @@ export async function retryOrder(id) {
 async function setDayStatus(order, status) {
   await updateJSON(days(), dayKey(order.location, order.date), (doc) => {
     const b = doc.bookings.find((x) => x.id === order.id);
+    const group = order.access?.groupId;
     if (b) {
-      if (b.status === status) return undefined;
+      if (b.status === status && b.group === group) return undefined;
       b.status = status;
+      if (group) b.group = group;
     } else if (status === 'paid') {
       const loc = getLocation(order.location);
-      doc.bookings.push({ id: order.id, start: order.start, end: order.end, units: unitsFor(loc, order.people), status });
+      doc.bookings.push({ id: order.id, periods: order.periods, units: unitsFor(loc, order.people), status, group });
     } else {
       return undefined;
     }
@@ -203,9 +218,90 @@ export async function markPaid(id, info) {
     o.payment = info;
     return o;
   });
-  await setDayStatus(order, 'paid');
+  const withAccess = await assignAccess(order);
+  await setDayStatus(withAccess, 'paid');
   if (!order.invoiceResult) await tryIssueInvoice(order);
-  return order;
+  return withAccess;
+}
+
+/* ---------- 入場密碼 ---------- */
+
+const newCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+
+// 找同一位客人、同一天、同場地、時間相連的已付款預約 → 沿用它的密碼
+async function findLinked(order) {
+  if (order.extendOf) {
+    const parent = await readJSON(orders(), order.extendOf);
+    if (parent?.access) return parent;
+  }
+  const doc = await readJSON(days(), dayKey(order.location, order.date));
+  for (const b of doc?.bookings || []) {
+    if (b.id === order.id || b.status !== 'paid' || !b.group) continue;
+    const o = await readJSON(orders(), b.id);
+    if (o?.access && o.customer.phone === order.customer.phone &&
+        (o.end === order.start || order.end === o.start)) return o;
+  }
+  return null;
+}
+
+export async function assignAccess(order) {
+  if (order.access) return order;
+  const linked = await findLinked(order);
+  const access = linked
+    ? { code: linked.access.code, groupId: linked.access.groupId }
+    : { code: newCode(), groupId: order.id };
+  return updateJSON(orders(), order.id, (o) => {
+    if (o.access) return undefined;
+    o.access = access;
+    return o;
+  });
+}
+
+// 同一組密碼底下的所有預約（含加訂），算出整段可入場時間
+export async function groupInfo(order) {
+  if (!order.access) return null;
+  const doc = await readJSON(days(), dayKey(order.location, order.date));
+  const members = (doc?.bookings || []).filter((b) => b.status === 'paid' && b.group === order.access.groupId);
+  const ids = PERIODS.map((p) => p.id).filter((id) => members.some((m) => m.periods.includes(id)) || order.periods.includes(id));
+  const first = PERIODS.find((p) => p.id === ids[0]);
+  const last = PERIODS.find((p) => p.id === ids[ids.length - 1]);
+  return { periods: ids, start: first.start, end: last.end, count: Math.max(members.length, 1) };
+}
+
+/* ---------- 加訂下一個時段（分開計價，不套用多時段優惠） ---------- */
+
+export async function nextPeriodFor(order, group) {
+  const lastIdx = PERIODS.findIndex((p) => p.id === group.periods[group.periods.length - 1]);
+  const next = PERIODS[lastIdx + 1];
+  if (!next) return null;
+  const loc = getLocation(order.location);
+  const av = await availability(order.location, order.date);
+  const slot = av.periods.find((p) => p.id === next.id);
+  return {
+    id: next.id,
+    name: next.name,
+    start: next.start,
+    end: next.end,
+    amount: priceFor(loc, [next.id], order.people),
+    available: !slot.past && slot.remaining >= unitsFor(loc, order.people),
+  };
+}
+
+export async function createExtension(parentId) {
+  const parent = await readJSON(orders(), parentId);
+  if (!parent || parent.status !== 'paid' || !parent.access) throw new UserError('只有付款完成的預約可以加訂');
+  const group = await groupInfo(parent);
+  const next = await nextPeriodFor(parent, group);
+  if (!next) throw new UserError('今天已經沒有下一個時段可以加訂了');
+  if (!next.available) throw new UserError(`${next.name}時段已經額滿，無法加訂`);
+  return createOrder({
+    location: parent.location,
+    date: parent.date,
+    periods: [next.id],
+    people: parent.people,
+    customer: parent.customer,
+    invoice: parent.invoice,
+  }, { extendOf: parent.access.groupId });
 }
 
 export async function tryIssueInvoice(order) {
@@ -241,9 +337,11 @@ export async function markFailed(id, reason) {
 export function publicOrder(o) {
   if (!o) return null;
   return {
+    extendOf: o.extendOf,
     id: o.id,
     locationName: o.locationName,
     date: o.date,
+    periodLabel: periodLabel(o.periods),
     start: o.start,
     end: o.end,
     people: o.people,
@@ -257,11 +355,11 @@ export function publicOrder(o) {
 
 export function publicConfig() {
   return {
-    openHour: OPEN_HOUR,
-    closeHour: CLOSE_HOUR,
+    periods: PERIODS,
     maxDaysAhead: MAX_DAYS_AHEAD,
     holdMinutes: HOLD_MINUTES,
     today: taipeiNow().date,
     locations: LOCATIONS,
+    venue: VENUE,
   };
 }
