@@ -6,6 +6,7 @@
   "description": "Hour Jungle 場地預約＋綠界金流＋電子發票",
   "scripts": {
     "dev": "node dev-server.mjs",
+    "dev:hj": "SITE=hj PORT=8889 node dev-server.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {

@@ -74,10 +74,10 @@ function render() {
     const inv = o.invoiceResult?.invoiceNo ? '發票 ' + o.invoiceResult.invoiceNo : o.invoiceError ? '⚠ 發票失敗：' + o.invoiceError : o.status === 'paid' ? '發票處理中' : '';
     c.innerHTML = `<span class="t"></span><span class="tag ${o.status}">${label[o.status] || o.status}</span>
       <span class="d"></span><b>${money(o.amount)}</b><small class="m"></small><small class="inv"></small>`;
-    c.querySelector('.t').textContent = `${o.date} ${hh(o.start)}–${hh(o.end)}・${o.locationName}・${o.people} 人${o.extendOf ? '・加訂' : ''}`;
+    c.querySelector('.t').textContent = `${o.date} ${hh(o.start)}–${hh(o.end)}・${o.locationName}${o.mode === 'consult' ? '' : `・${o.people} 人`}${o.extendOf ? '・加訂' : ''}`;
     c.querySelector('.d').textContent = `${o.customer.name}　${o.customer.phone}　${o.customer.email}`;
     c.querySelector('.m').textContent = `${o.access ? '🔑 密碼 ' + o.access.code + '｜' : ''}${o.id}${o.customer.note ? '｜備註：' + o.customer.note : ''}${o.payment?.simulated ? '｜模擬付款' : ''}`;
-    c.querySelector('.inv').textContent = inv;
+    c.querySelector('.inv').textContent = inv + (o.calendar?.error ? '｜⚠ Google 日曆寫入失敗：' + o.calendar.error : o.calendar?.eventId ? '｜📅 已寫入日曆' : '') + (o.topic ? '｜諮詢：' + o.topic : '') + (o.customer.company ? '｜' + o.customer.company : '');
     if (o.status === 'paid' && !o.invoiceResult?.invoiceNo) {
       const b = document.createElement('button'); b.className = 'btn ghost'; b.textContent = '補開發票'; b.style.gridColumn = '1 / -1';
       b.onclick = async () => {

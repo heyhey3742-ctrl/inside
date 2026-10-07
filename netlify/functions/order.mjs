@@ -1,4 +1,4 @@
-import { publicOrder, groupInfo, nextPeriodFor, periodLabel } from '../lib/booking.mjs';
+import { publicOrder, groupInfo, nextPeriodFor } from '../lib/booking.mjs';
 import { orders, readJSON } from '../lib/db.mjs';
 import { json, handle } from '../lib/http.mjs';
 
@@ -17,7 +17,7 @@ export default handle(async (req) => {
       code: order.access.code,
       start: group.start,
       end: group.end,
-      periodLabel: periodLabel(group.periods),
+      periodLabel: group.label,
       bookings: group.count,
     };
     out.next = await nextPeriodFor(order, group);

@@ -14,6 +14,19 @@ process.env.ADMIN_PASSWORD ||= 'admin';
 process.env.LIFF_ID ||= 'dev-mock';
 process.env.LINE_CHANNEL_ACCESS_TOKEN ||= 'dev-token';
 process.env.LINE_API_BASE ||= `${ORIGIN}/__mock/line`;
+// 假 Google 日曆：每館一本日曆，另外預先放一筆「同事手動排的預約」測試是否會擋住
+if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+  const { privateKey } = (await import('node:crypto')).generateKeyPairSync('rsa', { modulusLength: 2048 });
+  process.env.GOOGLE_SERVICE_ACCOUNT_JSON = JSON.stringify({
+    client_email: 'booking@dev.iam.gserviceaccount.com',
+    private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+  });
+  process.env.GOOGLE_TOKEN_URL = `${ORIGIN}/__mock/google/token`;
+  process.env.GOOGLE_API_BASE = `${ORIGIN}/__mock/google`;
+  for (const k of ['XINYI', 'DAZHONG', 'DONGNING', 'ZHONGSHAN', 'CHONGXUE', 'CONSULT']) {
+    process.env['GCAL_' + k] ||= `hj-${k.toLowerCase()}@group.calendar.google.com`;
+  }
+}
 
 const { checkMacValue } = await import('./netlify/lib/ecpay.mjs');
 const { encrypt, decrypt } = await import('./netlify/lib/invoice.mjs');
@@ -93,6 +106,43 @@ async function mockInvoice(request, url) {
   return Response.json({ MerchantID: cfg.merchantId, RpHeader: { Timestamp: 0 }, TransCode: 1, TransMsg: 'Success', Data: encrypt(out, cfg) });
 }
 
+const gEvents = [];
+{
+  // 明天 14:00–16:00 東寧會議室已被同事手動排入
+  const t = new Date(Date.now() + 8 * 3600000 + 86400000).toISOString().slice(0, 10);
+  gEvents.push({ calendar: 'hj-dongning@group.calendar.google.com', summary: '會議室｜同事手動排的會議',
+    start: new Date(Date.parse(t + 'T14:00:00+08:00')).toISOString(), end: new Date(Date.parse(t + 'T16:00:00+08:00')).toISOString() });
+}
+async function mockGoogle(request, url) {
+  if (url.pathname.endsWith('/token')) return Response.json({ access_token: 'dev-google-token', expires_in: 3600 });
+  if (request.headers.get('authorization') !== 'Bearer dev-google-token') return Response.json({ error: 'unauthorized' }, { status: 401 });
+  if (url.pathname.endsWith('/freeBusy')) {
+    const b = await request.json();
+    const calendars = {};
+    for (const { id } of b.items) {
+      calendars[id] = { busy: gEvents.filter((e) => e.calendar === id && e.end > b.timeMin && e.start < b.timeMax).map(({ start, end }) => ({ start, end })) };
+    }
+    return Response.json({ calendars });
+  }
+  const m = url.pathname.match(/calendars\/([^/]+)\/events$/);
+  if (m && request.method === 'GET') {
+    const id = decodeURIComponent(m[1]);
+    const tMin = url.searchParams.get('timeMin'), tMax = url.searchParams.get('timeMax');
+    const items = gEvents.filter((e) => e.calendar === id && e.end > tMin && e.start < tMax)
+      .map((e) => ({ id: e.id, summary: e.summary, start: { dateTime: e.start }, end: { dateTime: e.end } }));
+    return Response.json({ items });
+  }
+  if (m) {
+    const b = await request.json();
+    const ev = { id: 'ev' + gEvents.length, calendar: decodeURIComponent(m[1]), summary: b.summary, start: new Date(b.start.dateTime).toISOString(), end: new Date(b.end.dateTime).toISOString() };
+    gEvents.push(ev);
+    console.log('[假 Google 日曆] 新增', ev.calendar, ev.summary, ev.start, '→', ev.end);
+    return Response.json({ id: ev.id });
+  }
+  if (url.pathname.endsWith('/events-list')) return Response.json(gEvents);
+  return new Response('not found', { status: 404 });
+}
+
 const linePushes = [];
 async function mockLine(request, url) {
   if (url.pathname.endsWith('/oauth2/v2.1/verify')) {
@@ -114,6 +164,7 @@ async function mockLine(request, url) {
 http.createServer(async (req, res) => {
   try {
     const url = new URL(ORIGIN + req.url);
+    if (url.pathname.startsWith('/__mock/google')) return send(res, await mockGoogle(await toRequest(req), url));
     if (url.pathname.startsWith('/__mock/line')) return send(res, await mockLine(await toRequest(req), url));
     if (url.pathname === '/__mock/ecpay') return send(res, await mockEcpay(await toRequest(req)));
     if (url.pathname.startsWith('/__mock/invoice')) return send(res, await mockInvoice(await toRequest(req), url));
@@ -129,4 +180,4 @@ http.createServer(async (req, res) => {
     if (e.code !== 'ENOENT') console.error(e);
     res.writeHead(404); res.end('Not found');
   }
-}).listen(PORT, () => console.log(`本機預約系統：${ORIGIN}（後台密碼：${process.env.ADMIN_PASSWORD}）`));
+}).listen(PORT, () => console.log(`本機預約系統［${process.env.SITE || 'cafe'}］：${ORIGIN}（後台密碼：${process.env.ADMIN_PASSWORD}）`));

@@ -226,3 +226,40 @@ header.top small { color: var(--muted); display: block; font-size: 13px; line-he
 header.top a { color: var(--brand); }
 
 .support { display: block; text-align: center; margin: 18px auto 0; padding: 12px; border-radius: 99px; background: #06c755; color: #fff; font-weight: 700; text-decoration: none; max-width: 320px; }
+
+/* 小時格子 */
+.slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.slot {
+  border: 1.5px solid var(--line); background: var(--card); color: var(--text); border-radius: 14px;
+  padding: 9px 4px; font: inherit; font-size: 15px; cursor: pointer; text-align: center;
+}
+.slot small { display: block; font-size: 11px; color: var(--muted); }
+.slot.after { border-style: dashed; background: var(--cream); }
+.slot:disabled { background: var(--full); color: var(--muted); cursor: not-allowed; text-decoration: line-through; border-style: solid; }
+.slot.in { background: var(--brand-soft); border-color: var(--brand); }
+.slot.edge { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+.slot.edge small { color: inherit; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; border: 1px solid var(--line); }
+
+/* 標籤按鈕 */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chips button { border: 1.5px solid var(--line); background: var(--card); color: var(--text); border-radius: 99px; padding: 7px 14px; font: inherit; font-size: 14px; cursor: pointer; }
+.chips button.sel { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+
+/* 地點卡片價目 */
+.loc .branch { font-size: 12px; color: var(--brand); font-weight: 700; letter-spacing: .5px; }
+.loc .mini { width: 100%; border-collapse: collapse; margin: 8px 0 4px; font-size: 14px; }
+.loc .mini td { padding: 5px 0; border-top: 1px solid var(--line); color: var(--muted); }
+.loc .mini td:last-child { text-align: right; color: var(--text); }
+.tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--cream); color: var(--muted); margin-left: 6px; vertical-align: 2px; font-weight: 400; }
+
+.summary .lines { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); font-size: 14px; color: var(--muted); }
+.summary .lines div { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
+.quote { background: var(--cream); border-radius: 14px; padding: 10px 14px; font-size: 14px; margin-top: 12px; }
+.quote div { display: flex; justify-content: space-between; gap: 10px; }
+.quote b { color: var(--brand); }
+
+.place { padding: 14px 20px; display: flex; flex-direction: column; }
+.place small { color: var(--brand); font-weight: 700; font-size: 13px; }
+.place b { font-size: 19px; }

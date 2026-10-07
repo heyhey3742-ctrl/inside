@@ -11,7 +11,7 @@
 <body>
 <header class="hero">
   <div class="brand" id="brand">Hour Jungle</div>
-  <p>中山・線上預約</p>
+  <p id="tagline"></p>
 </header>
 <div class="wrap">
   <div class="steps" id="steps"><span></span><span></span><span></span><span></span></div>
@@ -20,42 +20,62 @@
   <section id="step1">
     <div class="card venue" id="venue" style="margin-top:22px"></div>
     <h2>選擇地點</h2>
+    <div class="chips" id="branchTabs" style="margin-bottom:12px"></div>
     <div id="locations"><div class="spinner"></div></div>
-    <p class="center" style="margin-top:18px"><a href="/my.html" class="muted">已經預約過？查詢入場密碼 →</a></p>
+    <p class="center" style="margin-top:18px"><a href="/my.html" class="muted">已經預約過？查詢我的預約 →</a></p>
   </section>
 
   <!-- 2. 人數、日期、時段 -->
   <section id="step2" class="hidden">
-    <div class="q" style="margin-top:22px"><span class="qi">Q</span><span>什麼是時段計費制？</span></div>
-    <div class="card a">
-      <div class="lead">
-        <p>我們分成 <em>早 / 中 / 晚</em> 三個時段<br>可自由選擇<em>單時段</em>或<em>多時段</em>，一次付清👇</p>
-        <span class="ai">A</span>
+    <div class="card place" id="placeTitle" style="margin-top:22px"></div>
+
+    <!-- 時段制（咖啡廳）：Q&A 價目表 -->
+    <div id="periodIntro" class="hidden">
+      <div class="q"><span class="qi">Q</span><span>什麼是時段計費制？</span></div>
+      <div class="card a">
+        <div class="lead">
+          <p>我們分成 <em>早 / 中 / 晚</em> 三個時段<br>可自由選擇<em>單時段</em>或<em>多時段</em>，一次付清👇</p>
+          <span class="ai">A</span>
+        </div>
+        <details class="prices" id="priceTable">
+          <summary>方案價目表</summary>
+          <div class="ptable" id="ptable"></div>
+        </details>
       </div>
-      <details class="prices" id="priceTable">
-        <summary>方案價目表</summary>
-        <div class="ptable" id="ptable"></div>
-      </details>
     </div>
 
-    <h2>人數</h2>
-    <div class="card">
-      <div class="stepper">
-        <button type="button" id="peopleMinus" aria-label="減少">−</button>
-        <output id="people">1</output>
-        <button type="button" id="peoplePlus" aria-label="增加">＋</button>
-      </div>
-      <p class="hint" id="peopleHint" style="margin:10px 0 0"></p>
+    <!-- 時租制（HJ）：價目表 -->
+    <div id="hourIntro" class="card hidden">
+      <div class="ptable" id="htable" style="padding:0"></div>
     </div>
 
-    <h2>日期與時段</h2>
+    <div id="peopleBox">
+      <h2>人數</h2>
+      <div class="card">
+        <div class="stepper">
+          <button type="button" id="peopleMinus" aria-label="減少">−</button>
+          <output id="people">1</output>
+          <button type="button" id="peoplePlus" aria-label="增加">＋</button>
+        </div>
+        <p class="hint" id="peopleHint" style="margin:10px 0 0"></p>
+      </div>
+    </div>
+
+    <div id="topicBox" class="hidden">
+      <h2>諮詢項目</h2>
+      <div class="card"><div class="chips" id="topics"></div></div>
+    </div>
+
+    <h2 id="timeTitle">日期與時段</h2>
     <div class="card">
       <div class="dates" id="dates"></div>
       <div class="more-date">其他日期 <input type="date" id="datePicker"></div>
-      <label>時段（可複選，需連續）</label>
+      <label id="slotHint">時段（可複選，需連續）</label>
       <div class="periods" id="periods"></div>
+      <div class="slots hidden" id="slots"></div>
+      <div class="legend hidden" id="legend"><span><i style="background:var(--brand)"></i>已選</span><span><i style="background:var(--full)"></i>額滿／已過</span><span id="afterLegend"><i style="background:var(--cream);border-style:dashed"></i>營業時間外</span></div>
       <div class="combo-note hidden" id="comboNote"></div>
-      <div class="time-summary">
+      <div class="time-summary" id="timeSummary">
         <div><small>入場時間</small><b id="tIn">—</b></div>
         <div><small>出場時間</small><b id="tOut">—</b></div>
       </div>
@@ -66,6 +86,10 @@
   <section id="step3" class="hidden">
     <h2>聯絡資料</h2>
     <form class="card" id="form" autocomplete="on" onsubmit="return false">
+      <div id="companyBox" class="hidden">
+        <label for="company">公司名稱（選填）</label>
+        <input id="company" autocomplete="organization">
+      </div>
       <label for="name">姓名</label>
       <input id="name" name="name" autocomplete="name" required>
       <label for="phone">手機</label>
@@ -75,6 +99,7 @@
       <label for="note">備註（選填）</label>
       <textarea id="note" maxlength="200" placeholder="例如：需要投影線、會晚 10 分鐘到"></textarea>
     </form>
+    <div id="invoiceBox">
     <h2>發票</h2>
     <div class="card">
       <div class="seg" id="invType">
@@ -101,6 +126,7 @@
         <input id="loveCode" inputmode="numeric" maxlength="7" placeholder="3–7 碼數字">
       </div>
     </div>
+    </div>
   </section>
 
   <!-- 4. 確認 -->
@@ -108,13 +134,14 @@
     <h2>確認預約</h2>
     <div class="card summary">
       <dl id="summary"></dl>
+      <div class="lines" id="lines"></div>
       <div class="total"><span>應付金額</span><b id="total"></b></div>
     </div>
-    <p class="hint">按下付款後會前往綠界 ECPay 安全刷卡頁面。付款完成前，時段會為你保留 <span id="holdMin">20</span> 分鐘。</p>
+    <p class="hint" id="payHint">按下付款後會前往綠界 ECPay 安全刷卡頁面。付款完成前，時段會為你保留 <span id="holdMin">20</span> 分鐘。</p>
   </section>
 
   <div id="error" class="error hidden"></div>
-  <footer>台灣維百股份有限公司中山分公司・Hour Jungle Co-Working</footer>
+  <footer id="footer"></footer>
 </div>
 
 <div class="bar">

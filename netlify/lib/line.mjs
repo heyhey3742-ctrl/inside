@@ -1,5 +1,5 @@
 // LINE：驗證 LIFF 登入身分、推播訊息
-import { lineConfig } from './config.mjs';
+import { lineConfig, BRAND as SITE_BRAND } from './config.mjs';
 
 // 用 LIFF 給的 ID token 向 LINE 確認是誰（避免有人假冒別人的 LINE ID）
 export async function verifyIdToken(idToken) {
@@ -35,7 +35,7 @@ export async function push(to, messages) {
   }
 }
 
-const BRAND = '#C96A43';
+const BRAND = SITE_BRAND.theme.brand.toUpperCase();
 const hh = (h) => (h >= 24 ? '隔日 ' : '') + String(h % 24).padStart(2, '0') + ':00';
 const row = (k, v) => ({
   type: 'box', layout: 'horizontal', contents: [
@@ -66,11 +66,39 @@ export function accessMessage({ order, group, origin }) {
         type: 'box', layout: 'vertical', spacing: 'sm', contents: [
           { type: 'text', text: order.extendOf ? '加訂成功，密碼不變 ✅' : '預約成功 ✅', weight: 'bold', size: 'md' },
           row('地點', order.locationName),
-          row('時段', `${order.periodLabel}（${hh(order.start)}–${hh(order.end)}）`),
+          row('時段', `${order.slotLabel}（${hh(order.start)}–${hh(order.end)}）`),
           row('人數', `${order.people} 人`),
           row('金額', `NT$ ${order.amount.toLocaleString('zh-TW')}`),
           row('編號', order.id),
           { type: 'text', text: '到現場在門口輸入密碼即可入場', size: 'xs', color: '#8A7F78', margin: 'md', wrap: true },
+        ],
+      },
+      footer: { type: 'box', layout: 'vertical', contents: [button('查看預約', `${origin}/success.html?id=${order.id}`)] },
+    },
+  };
+}
+
+// 預約確認（沒有入場密碼的網站，例如 HJ 會議室、諮詢）
+export function confirmMessage({ order, origin }) {
+  const consult = order.mode === 'consult';
+  return {
+    type: 'flex',
+    altText: `預約成功：${order.locationName} ${order.date} ${hh(order.start)}`,
+    contents: {
+      type: 'bubble',
+      header: {
+        type: 'box', layout: 'vertical', backgroundColor: BRAND, paddingAll: '18px', contents: [
+          { type: 'text', text: '預約成功 ✅', color: '#FFFFFF', size: 'lg', weight: 'bold' },
+          { type: 'text', text: order.locationName, color: '#FFFFFFDD', size: 'sm', wrap: true },
+        ],
+      },
+      body: {
+        type: 'box', layout: 'vertical', spacing: 'sm', contents: [
+          row('日期', order.date),
+          row('時間', order.slotLabel),
+          ...(consult ? [row('項目', order.topic || '')] : [row('人數', `${order.people} 人`), row('金額', `NT$ ${order.amount.toLocaleString('zh-TW')}`)]),
+          row('編號', order.id),
+          { type: 'text', text: consult ? '專人會在預約前與你聯繫確認' : '當天請直接到館，報上姓名即可', size: 'xs', color: '#8A7F78', margin: 'md', wrap: true },
         ],
       },
       footer: { type: 'box', layout: 'vertical', contents: [button('查看預約', `${origin}/success.html?id=${order.id}`)] },

@@ -11,7 +11,7 @@
 <body>
 <header class="hero">
   <div class="brand" id="brand">Hour Jungle</div>
-  <p>查詢入場密碼</p>
+  <p>查詢預約</p>
 </header>
 <div class="wrap">
   <div id="recent" class="hidden" style="margin-top:22px">
@@ -31,11 +31,11 @@
 </div>
 <script src="/icons.js"></script>
 <script src="/pay.js"></script>
+<script src="/brand.js"></script>
 <script src="/support.js"></script>
 <script src="/line.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
-$('#brand').innerHTML = icon('leaf') + 'Hour Jungle';
 $('#f').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = $('#oid').value.trim().toUpperCase(), tail = $('#tail').value.trim();
@@ -66,8 +66,8 @@ $('#f').addEventListener('submit', async (e) => {
     a.className = 'card'; a.style.display = 'block'; a.style.color = 'inherit'; a.style.textDecoration = 'none';
     a.href = '/success.html?id=' + o.id;
     a.innerHTML = '<b></b><div class="muted" style="font-size:14px"></div>';
-    a.querySelector('b').textContent = `${o.date}・${o.locationName}・${o.periodLabel}`;
-    a.querySelector('div').textContent = `${o.id}　點我看入場密碼 →`;
+    a.querySelector('b').textContent = `${o.date}・${o.locationName}・${o.slotLabel}`;
+    a.querySelector('div').textContent = `${o.id}　點我看預約 →`;
     $('#recentList').appendChild(a);
   }
 })();

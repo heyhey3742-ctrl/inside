@@ -16,7 +16,13 @@
 <div class="wrap">
   <div id="loading" class="card"><div class="spinner"></div></div>
   <div id="ok" class="hidden">
-    <div class="card code-card">
+    <div class="card code-card hidden" id="confirmCard">
+      <small id="confirmKicker">預約成功</small>
+      <div style="font-size:26px;font-weight:800;margin:6px 0" id="confirmTitle"></div>
+      <div class="valid" id="confirmTime"></div>
+      <p style="margin:12px 0 0;font-size:14px;opacity:.9" id="confirmNote"></p>
+    </div>
+    <div class="card code-card" id="codeCard">
       <small>入場密碼</small>
       <div class="code" id="code"></div>
       <div class="valid" id="valid"></div>
@@ -27,9 +33,9 @@
       <p id="extendDesc"></p>
       <button class="btn block" id="extendBtn" type="button"></button>
     </div>
-    <div class="card summary"><dl id="info"></dl><div class="total"><span>本筆已付</span><b id="amt"></b></div></div>
+    <div class="card summary"><dl id="info"></dl><div class="total"><span>本筆金額</span><b id="amt"></b></div></div>
     <p class="hint center" id="mailNote"></p>
-    <p class="hint center">請把這一頁加入書籤或截圖。之後也可以在首頁用「預約編號＋手機末三碼」查詢密碼。</p>
+    <p class="hint center">請把這一頁加入書籤或截圖。之後也可以在首頁用「預約編號＋手機末三碼」查詢預約。</p>
     <a class="btn ghost block" href="/">回到首頁</a>
   </div>
   <div id="wait" class="hidden card center">
@@ -40,11 +46,11 @@
 </div>
 <script src="/icons.js"></script>
 <script src="/pay.js"></script>
+<script src="/brand.js"></script>
 <script src="/support.js"></script>
 <script>
 const id = new URLSearchParams(location.search).get('id');
 const $ = (s) => document.querySelector(s);
-$('#brand').innerHTML = icon('leaf') + 'Hour Jungle';
 let tries = 0;
 function showErr(m) { const e = $('#error'); e.textContent = m; e.classList.remove('hidden'); }
 
@@ -54,7 +60,7 @@ async function load() {
     const o = await res.json();
     if (!res.ok) throw new Error(o.error);
     $('#loading').classList.add('hidden');
-    if (o.status === 'paid' && o.access) return render(o);
+    if (o.status === 'paid') return render(o);
     if (o.status === 'failed') return location.replace('/fail.html?id=' + o.id);
     $('#wait').classList.remove('hidden');
     if (++tries < 15) setTimeout(load, 2000);
@@ -70,19 +76,31 @@ function render(o) {
     localStorage.setItem('hj-bookings', JSON.stringify([o.id, ...list].slice(0, 10)));
   } catch {}
   const a = o.access;
-  $('#code').textContent = a.code;
-  $('#valid').textContent = `${o.date}　${hh(a.start)} – ${hh(a.end)} 可入場`;
-  $('#linkNote').textContent = a.bookings > 1 ? `已加訂（${a.periodLabel}），密碼不變` : '到現場在門口輸入密碼即可入場';
+  $('#codeCard').classList.toggle('hidden', !a);
+  $('#confirmCard').classList.toggle('hidden', !!a);
+  if (a) {
+    $('#code').textContent = a.code;
+    $('#valid').textContent = `${o.date}　${hh(a.start)} – ${hh(a.end)} 可入場`;
+    $('#linkNote').textContent = a.bookings > 1 ? `已加訂（${a.periodLabel}），密碼不變` : '到現場在門口輸入密碼即可入場';
+  } else {
+    const consult = o.mode === 'consult';
+    $('#confirmKicker').textContent = consult ? '諮詢預約成功' : (o.amount ? '付款成功・預約完成' : '預約成功');
+    $('#confirmTitle').textContent = o.locationName;
+    $('#confirmTime').textContent = `${o.date}　${o.slotLabel}`;
+    $('#confirmNote').textContent = consult ? '專人會在預約前與你聯繫確認' : '當天請直接到館，報上姓名或預約編號即可';
+  }
 
   const info = $('#info'); info.innerHTML = '';
-  const rows = [['預約編號', o.id], ['地點', o.locationName], ['日期', o.date], ['時段', o.periodLabel], ['入場', hh(o.start)], ['出場', hh(o.end)], ['人數', o.people + ' 人']];
+  const rows = [['預約編號', o.id], ['地點', o.locationName], ['日期', o.date], ['時段', o.slotLabel]];
+  if (o.topic) rows.push(['項目', o.topic]);
+  if (o.mode !== 'consult') rows.push(['入場', hh(o.start)], ['出場', hh(o.end)], ['人數', o.people + ' 人']);
   for (const [k, v] of rows) {
     const dt = document.createElement('dt'); dt.textContent = k;
     const dd = document.createElement('dd'); dd.textContent = v;
     info.append(dt, dd);
   }
-  $('#amt').textContent = money(o.amount);
-  $('#mailNote').textContent = o.invoiceNo
+  $('#amt').textContent = o.amount ? money(o.amount) : '免費';
+  $('#mailNote').textContent = !o.amount ? '' : o.invoiceNo
     ? `電子發票 ${o.invoiceNo} 已開立，通知信寄到 ${o.email}`
     : `電子發票開立後會寄到 ${o.email}`;
 
@@ -99,7 +117,7 @@ function render(o) {
     b.disabled = !n.available;
     b.onclick = extend;
   }
-  if (!o.invoiceNo && tries++ < 20) setTimeout(async () => {
+  if (o.amount && !o.invoiceNo && tries++ < 20) setTimeout(async () => {
     const r = await fetch('/api/order?id=' + o.id).then((r) => r.json()).catch(() => ({}));
     if (r.invoiceNo) $('#mailNote').textContent = `電子發票 ${r.invoiceNo} 已開立，通知信寄到 ${r.email}`;
   }, 3000);

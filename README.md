@@ -1,5 +1,44 @@
 # Hour Jungle 線上預約系統
 
+**同一套程式、兩個網站**：在 Netlify 開兩個 site，都連到這個 repo，用環境變數 `SITE` 區分：
+
+| 網站 | `SITE` | 內容 | 設定檔 |
+|---|---|---|---|
+| 無人咖啡廳 | `cafe`（預設） | 早／中／晚時段制、入場密碼、加訂提醒 | `netlify/lib/sites/cafe.mjs` |
+| Hour Jungle 各館 | `hj` | 會議室／教室時租、共同工作空間、獨立辦公室參觀、公司設立諮詢、Google 日曆同步 | `netlify/lib/sites/hj.mjs` |
+
+改一次程式，兩個網站都會更新；品牌、價格、LINE 官方帳號、綠界帳號各自用自己的環境變數。
+
+## Hour Jungle 網站（SITE=hj）
+
+### 預約類型
+- **會議室／教室**：平日時租，滿額自動改日租價；營業時間外加價（信義為 3 小時 $5,500 套裝）；假日 N 小時起租套裝、超時加價
+- **共同工作空間**：每人時租，滿額改日租；東寧、中山有「低消甜點優惠 3H」自動套用
+- **獨立辦公室**：預約參觀（免費），月租請專人報價
+- **公司設立／工商登記諮詢**：免費預約，不用付款
+
+價格與營業時間都在 `netlify/lib/sites/hj.mjs`，★ 標記的是尚待確認的預設值。國定假日請更新 `holidays` 清單（會用假日價）。
+
+### Google 日曆（同一個 Gmail，每館一本日曆）
+1. 到 [Google Cloud Console](https://console.cloud.google.com/) 建立專案 → 啟用 **Google Calendar API**
+2. 「IAM 與管理 → 服務帳號」建立服務帳號 → 「金鑰」→ 新增 JSON 金鑰並下載
+3. 用那個 Gmail 打開 Google 日曆，每一館的日曆：設定 → 「與特定使用者共用」→ 加入服務帳號的 Email（`xxx@xxx.iam.gserviceaccount.com`），權限選「**變更活動**」
+4. 每本日曆的「整合日曆」區塊可以找到「日曆 ID」
+5. Netlify 環境變數：
+
+| 名稱 | 填什麼 |
+|---|---|
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | 下載的 JSON 金鑰檔「整個內容」 |
+| `GCAL_XINYI` | 信義安和館日曆 ID |
+| `GCAL_DAZHONG` | 台中大忠館日曆 ID |
+| `GCAL_DONGNING` | 台南東寧館日曆 ID |
+| `GCAL_ZHONGSHAN` | 台南中山館日曆 ID |
+| `GCAL_CHONGXUE` | 台南崇學館日曆 ID |
+| `GCAL_CONSULT` | 公司設立諮詢要寫入的日曆 ID |
+
+**重要：** 同一館的日曆裡有好幾個空間，系統靠**活動標題**判斷是哪間被佔用。同事手動排預約時，標題要包含「會議室」、「教室」或「參觀」，例如「會議室｜王先生」。線上預約寫入的活動會自動帶「【線上預約・會議室】」。
+
+
 客人用手機掃 QR code → 看場地介紹 → 選地點 → 選人數、日期、早／中／晚時段 → 綠界刷卡 → 付款成功立即取得**入場密碼**，並自動開電子發票寄 Email。付款失敗會跳到失敗頁，可以一鍵重新付款。
 
 ## 時段計費
@@ -100,7 +139,7 @@
 
 ## 修改場地、價格、時段
 
-全部在 `netlify/lib/config.mjs`：
+咖啡廳的設定在 `netlify/lib/sites/cafe.mjs`：
 
 - `VENUE`：首頁「場地介紹」的文字、照片、設備、入場流程、規則
 - `PERIODS`：三個時段的名稱與時間
@@ -115,5 +154,6 @@
 ```bash
 npm install
 npm test        # 綠界簽章、發票加密測試
-npm run dev     # http://localhost:8888，內建「假綠界」可模擬付款成功／失敗，後台密碼 admin
+npm run dev     # 咖啡廳 http://localhost:8888，內建假綠界、假 LINE、假 Google 日曆，後台密碼 admin
+npm run dev:hj  # Hour Jungle http://localhost:8889
 ```

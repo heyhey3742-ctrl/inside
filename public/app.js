@@ -1,9 +1,12 @@
 const $ = (s) => document.querySelector(s);
 const state = {
-  cfg: null, step: 1, loc: null, people: 1, date: null,
-  avail: [], sel: [], invType: 'personal', busy: false, line: null,
+  cfg: null, step: 1, loc: null, branch: '', people: 1, date: null,
+  avail: [], sel: [],          // periods 模式：選到的時段 id
+  start: null, endSlot: null,  // hourly / consult 模式：選到的小時
+  topic: '', quote: null, invType: 'personal', busy: false, line: null,
 };
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
+const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -11,12 +14,18 @@ async function api(path, opts) {
   if (!res.ok) throw new Error(data.error || '連線失敗，請再試一次');
   return data;
 }
+const post = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 function showError(msg) {
   const e = $('#error');
   e.textContent = msg || '';
   e.classList.toggle('hidden', !msg);
   if (msg) e.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function flash(msg) {
+  showError(msg);
+  clearTimeout(flash.t);
+  flash.t = setTimeout(() => showError(''), 3000);
 }
 
 function addDays(iso, n) {
@@ -25,13 +34,34 @@ function addDays(iso, n) {
   return d.toISOString().slice(0, 10);
 }
 
+const mode = () => state.loc?.mode;
+const isFree = () => state.loc?.pricing === 'free';
+const branchOf = (loc) => state.cfg.branches.find((b) => b.id === loc.branch);
+
+/* ---------- 品牌（兩個網站共用同一套畫面） ---------- */
+function applyBrand() {
+  const b = state.cfg.brand, t = b.theme, r = document.documentElement.style;
+  const vars = { brand: t.brand, 'brand-dark': t.brandDark, 'brand-soft': t.brandSoft, cream: t.cream, bg: t.bg, 'hero-from': t.heroFrom, 'hero-to': t.heroTo };
+  if (!matchMedia('(prefers-color-scheme: dark)').matches) for (const [k, v] of Object.entries(vars)) r.setProperty('--' + k, v);
+  else r.setProperty('--brand', t.brand);
+  document.querySelector('meta[name=theme-color]').content = t.brand;
+  $('#brand').innerHTML = icon(b.icon) + esc(b.name);
+  $('#tagline').textContent = b.tagline;
+  $('#footer').textContent = b.footer;
+  document.title = b.name + ' 預約';
+}
+
 /* ---------- 步驟切換 ---------- */
 function go(step) {
   state.step = step;
   for (let i = 1; i <= 4; i++) $('#step' + i).classList.toggle('hidden', i !== step);
   document.querySelectorAll('#steps span').forEach((s, i) => s.classList.toggle('on', i < step));
   $('#back').classList.toggle('hidden', step === 1);
-  $('#next').textContent = step === 4 ? '前往付款' : '下一步';
+  $('#next').textContent = step === 4 ? (isFree() ? '確認預約' : '前往付款') : '下一步';
+  if (step === 3) {
+    $('#invoiceBox').classList.toggle('hidden', isFree());
+    $('#companyBox').classList.toggle('hidden', mode() !== 'consult');
+  }
   showError('');
   if (step === 4) renderSummary();
   refreshBar();
@@ -39,105 +69,201 @@ function go(step) {
 }
 
 function units() {
-  return state.loc.pricing === 'perRoom' ? 1 : state.people;
+  return state.loc.pricing === 'perPerson' ? state.people : 1;
 }
+
+/* ---------- 計價 ---------- */
 const PIDS = () => state.cfg.periods.map((p) => p.id);
 const periodOf = (id) => state.cfg.periods.find((p) => p.id === id);
-// 選到的時段，依早→中→晚排好
-function selected() {
+function selectedPeriods() {
   return PIDS().filter((id) => state.sel.includes(id));
 }
-function unitPrice(loc, ids) {
+function periodUnit(loc, ids) {
   if (!ids.length) return 0;
   return ids.length === 1 ? loc.prices.single[ids[0]] : loc.prices.combos[ids.join('+')];
-}
-function amount() {
-  if (!state.loc) return 0;
-  const p = unitPrice(state.loc, selected());
-  if (!p) return 0;
-  return state.loc.pricing === 'perRoom' ? p : p * state.people;
 }
 function periodLabel(ids) {
   if (ids.length === state.cfg.periods.length) return '全天';
   return ids.map((id) => periodOf(id).name).join('＋');
 }
+function hasSelection() {
+  if (!state.loc) return false;
+  if (mode() === 'periods') return selectedPeriods().length > 0;
+  if (mode() === 'consult') return state.start != null && !!state.topic;
+  return state.start != null && !!state.quote;
+}
+function amount() {
+  if (!state.loc) return 0;
+  if (mode() === 'periods') {
+    const p = periodUnit(state.loc, selectedPeriods());
+    if (!p) return 0;
+    return state.loc.pricing === 'perRoom' ? p : p * state.people;
+  }
+  return state.quote?.amount || 0;
+}
+function selectionLabel() {
+  if (mode() === 'periods') return periodLabel(selectedPeriods());
+  if (state.start == null) return '';
+  if (mode() === 'consult') return hh(state.start);
+  return `${hh(state.start)}–${hh(state.endSlot + 1)}（${state.endSlot + 1 - state.start} 小時）`;
+}
 function minPrice(loc) {
-  return Math.min(...Object.values(loc.prices.single));
+  if (loc.mode === 'periods') return Math.min(...Object.values(loc.prices.single));
+  return loc.schedule?.weekday?.rate || 0;
 }
 
 function refreshBar() {
   const next = $('#next');
   let ok = false;
   if (state.step === 1) ok = !!state.loc;
-  else if (state.step === 2) ok = amount() > 0;
+  else if (state.step === 2) ok = hasSelection();
   else ok = true;
   next.disabled = !ok || state.busy;
-  $('#price').textContent = money(amount());
-  const ids = selected();
+  $('#price').textContent = isFree() ? '免費' : money(amount());
+  const label = selectionLabel();
   $('#priceLabel').textContent = !state.loc ? '選擇地點開始預約'
-    : !ids.length ? '請選擇時段'
-    : periodLabel(ids) + (state.loc.pricing === 'perPerson' ? ` × ${state.people} 人` : '・整間');
+    : !label ? (mode() === 'consult' ? '請選擇時間' : '請選擇時段')
+    : label + (state.loc.pricing === 'perPerson' ? ` × ${state.people} 人` : '');
 }
 
 /* ---------- 場地介紹 ---------- */
 function renderVenue() {
   const v = state.cfg.venue;
-  const box = $('#venue');
-  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  box.innerHTML = `
+  $('#venue').innerHTML = `
     <div class="photos">${v.photos.map((src) => `<img src="${esc(src)}" alt="" loading="lazy">`).join('')}</div>
     <div class="vbody">
       <h3>場地介紹・${esc(v.title)}</h3>
       <p class="vintro">${esc(v.intro)}</p>
       <div class="feat">${v.features.map((f) => `<div>${icon(f.icon)}${esc(f.text)}</div>`).join('')}</div>
-      <details><summary class="muted" style="cursor:pointer;margin-top:12px;font-size:14px">入場流程與使用規則</summary>
-        <h4>入場流程</h4><ol>${v.steps.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
+      <details><summary class="muted" style="cursor:pointer;margin-top:12px;font-size:14px">預約流程與使用規則</summary>
+        <h4>流程</h4><ol>${v.steps.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
         <h4>使用規則</h4><ul>${v.rules.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
       </details>
     </div>`;
 }
 
 /* ---------- 1. 地點 ---------- */
+function renderBranchTabs() {
+  const box = $('#branchTabs');
+  const branches = state.cfg.branches;
+  box.classList.toggle('hidden', !branches.length);
+  if (!branches.length) return;
+  const tabs = [{ id: '', name: '全部' }, ...branches, { id: 'consult', name: '諮詢預約' }];
+  box.innerHTML = '';
+  for (const t of tabs) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = t.name;
+    b.className = state.branch === t.id ? 'sel' : '';
+    b.onclick = () => { state.branch = t.id; renderBranchTabs(); renderLocations(); };
+    box.appendChild(b);
+  }
+}
+
 function renderLocations() {
   const box = $('#locations');
   box.innerHTML = '';
-  for (const loc of state.cfg.locations) {
+  const list = state.cfg.locations.filter((l) => {
+    if (!state.branch) return true;
+    if (state.branch === 'consult') return l.mode === 'consult';
+    return l.branch === state.branch;
+  });
+  for (const loc of list) {
+    const br = branchOf(loc);
     const b = document.createElement('div');
     b.className = 'card loc' + (state.loc?.id === loc.id ? ' sel' : '');
     b.setAttribute('role', 'button');
     b.tabIndex = 0;
-    const unit = loc.pricing === 'perRoom' ? '/ 間' : '/ 人';
+    let price;
+    if (loc.pricing === 'free') price = '免費';
+    else if (loc.mode === 'periods') price = `單時段 ${money(minPrice(loc))} 起`;
+    else price = `${money(minPrice(loc))} / ${loc.pricing === 'perPerson' ? '人・' : ''}小時`;
+    const table = loc.priceTable ? `<table class="mini">${loc.priceTable.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}</table>` : '';
     b.innerHTML = `
-      <img src="${loc.image}" alt="">
+      <img src="${esc(loc.image)}" alt="">
       <div class="body">
-        <h3><span></span><b>單時段 ${money(minPrice(loc))} 起 <small>${unit}</small></b></h3>
-        <p class="desc"></p>
-        <p>📍 <span class="addr"></span>　<a target="_blank" rel="noopener">查看地圖</a></p>
+        ${br ? `<div class="branch">${esc(br.name)}</div>` : ''}
+        <h3><span>${esc(loc.name)}</span><b>${esc(price)}</b></h3>
+        <p>${esc(loc.desc)}</p>
+        ${table}
+        ${br || loc.address ? `<p>📍 ${esc(br?.address || loc.address)}　<a target="_blank" rel="noopener" href="${esc(br?.mapUrl || loc.mapUrl)}">查看地圖</a></p>` : ''}
       </div>`;
-    b.querySelector('h3 span').textContent = loc.name;
-    b.querySelector('.desc').textContent = loc.desc;
-    b.querySelector('.addr').textContent = loc.address;
-    const a = b.querySelector('a');
-    a.href = loc.mapUrl;
-    a.addEventListener('click', (e) => e.stopPropagation());
-    const pick = () => {
-      if (state.loc?.id !== loc.id) {
-        state.loc = loc;
-        state.people = Math.min(state.people, loc.maxPeople);
-        clearTime();
-      }
-      renderLocations();
-      go(2);
-      renderPriceTable();
-      loadSlots();
-    };
+    b.querySelector('a')?.addEventListener('click', (e) => e.stopPropagation());
+    const pick = () => selectLocation(loc);
     b.addEventListener('click', pick);
     b.addEventListener('keydown', (e) => { if (e.key === 'Enter') pick(); });
     box.appendChild(b);
   }
 }
 
+function selectLocation(loc) {
+  if (state.loc?.id !== loc.id) {
+    state.loc = loc;
+    state.people = Math.min(state.people, loc.maxPeople);
+    state.topic = '';
+    clearTime();
+  }
+  renderLocations();
+  setupStep2();
+  go(2);
+  loadSlots();
+}
+
 /* ---------- 2. 人數、日期、時段 ---------- */
+function setupStep2() {
+  const m = mode();
+  const br = branchOf(state.loc);
+  $('#placeTitle').innerHTML = (br ? `<small>${esc(br.name)}</small>` : '') + `<b>${esc(state.loc.name)}</b>`;
+  $('#periodIntro').classList.toggle('hidden', m !== 'periods');
+  $('#hourIntro').classList.toggle('hidden', m !== 'hourly');
+  $('#peopleBox').classList.toggle('hidden', m === 'consult');
+  $('#topicBox').classList.toggle('hidden', m !== 'consult');
+  $('#periods').classList.toggle('hidden', m !== 'periods');
+  $('#slots').classList.toggle('hidden', m === 'periods');
+  $('#legend').classList.toggle('hidden', m === 'periods');
+  $('#afterLegend').classList.toggle('hidden', m !== 'hourly');
+  $('#timeSummary').classList.toggle('hidden', m === 'consult');
+  $('#timeTitle').textContent = m === 'consult' ? '日期與時間' : '日期與時段';
+  $('#slotHint').textContent = m === 'periods' ? '時段（可複選，需連續）'
+    : m === 'consult' ? '時間（每次約 1 小時）' : '時間（先點入場時間，再點最後一個小時）';
+  if (m === 'periods') renderPriceTable();
+  if (m === 'hourly') {
+    $('#htable').innerHTML = '<h4 style="margin-top:0">價目表</h4>' +
+      state.loc.priceTable.map(([k, v]) => `<div class="row"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('') +
+      `<p class="unit">${state.loc.pricing === 'perPerson' ? '以上為每人價格，' : ''}系統會自動幫你算最划算的價格</p>`;
+  }
+  if (m === 'consult') {
+    const box = $('#topics');
+    box.innerHTML = '';
+    for (const t of state.loc.topics) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = t;
+      b.className = state.topic === t ? 'sel' : '';
+      b.onclick = () => { state.topic = t; setupStep2(); refreshBar(); };
+      box.appendChild(b);
+    }
+  }
+  renderPeople();
+}
+
+function renderPriceTable() {
+  const loc = state.loc;
+  const unit = loc.pricing === 'perRoom' ? '整間包場價格，不論人數' : '以上為每人價格';
+  const row = (label, price, ic = '') => `<div class="row"><span>${ic}${label}</span><b>$${price}</b></div>`;
+  const ps = state.cfg.periods;
+  let html = '<h4>單時段方案</h4>';
+  for (const p of ps) html += row(`${p.name} ${hhShort(p.start)}-${hhShort(p.end)}`, loc.prices.single[p.id], icon(p.icon));
+  html += '<h4 style="margin-top:22px">多時段方案</h4>';
+  for (const [k, v] of Object.entries(loc.prices.combos)) {
+    const ids = k.split('+');
+    const short = ids.map((id) => ({ 早上: '早', 下午: '午', 晚上: '晚' }[periodOf(id).name] || periodOf(id).name)).join('+');
+    html += row(`${ids.length === ps.length ? '全天' : '雙時段'}（${short}）`, v);
+  }
+  html += `<p class="unit">${unit}</p>`;
+  $('#ptable').innerHTML = html;
+}
+
 function renderPeople() {
   $('#people').textContent = state.people;
   $('#peopleMinus').disabled = state.people <= 1;
@@ -149,9 +275,8 @@ function renderPeople() {
 function changePeople(d) {
   state.people = Math.max(1, Math.min(state.loc.maxPeople, state.people + d));
   renderPeople();
-  // 人數變多時，原本選的時段可能不夠位子
-  state.sel = state.sel.filter((id) => fits(id));
-  renderPeriods();
+  if (mode() === 'periods') { state.sel = state.sel.filter((id) => fits(id)); renderPeriods(); }
+  else { if (state.start != null && !rangeFits(state.start, state.endSlot)) clearTime(); renderSlots(); updateQuote(); }
   refreshBar();
 }
 
@@ -181,51 +306,35 @@ function pickDate(iso) {
   loadSlots();
 }
 
-function renderPriceTable() {
-  const loc = state.loc;
-  const unit = loc.pricing === 'perRoom' ? '整間包場價格，不論人數' : '以上為每人價格';
-  const row = (label, price, ic = '') => `<div class="row"><span>${ic}${label}</span><b>$${price}</b></div>`;
-  const ps = state.cfg.periods;
-  let html = '<h4>單時段方案</h4>';
-  for (const p of ps) html += row(`${p.name} ${hhShort(p.start)}-${hhShort(p.end)}`, loc.prices.single[p.id], icon(p.icon));
-  html += '<h4 style="margin-top:22px">多時段方案</h4>';
-  for (const [k, v] of Object.entries(loc.prices.combos)) {
-    const ids = k.split('+');
-    const short = ids.map((id) => periodOf(id).name[0] === '下' ? '午' : periodOf(id).name[0]).join('+');
-    html += row(`${ids.length === ps.length ? '全天' : '雙時段'}（${short}）`, v);
-  }
-  html += `<p class="unit">${unit}</p>`;
-  $('#ptable').innerHTML = html;
-}
-
 async function loadSlots() {
-  renderPeople();
   if (!state.date) { state.date = state.cfg.today; renderDates(); }
-  const box = $('#periods');
-  box.innerHTML = '<div class="spinner"></div>';
+  const box = mode() === 'periods' ? $('#periods') : $('#slots');
+  box.innerHTML = '<div class="spinner" style="grid-column:1/-1"></div>';
   try {
     const data = await api(`/api/availability?location=${state.loc.id}&date=${state.date}`);
     if (data.date !== state.date || data.location !== state.loc.id) return;
-    state.avail = data.periods;
-    state.sel = state.sel.filter((id) => fits(id));
-    renderPeriods();
+    state.avail = data.slots;
+    if (mode() === 'periods') { state.sel = state.sel.filter((id) => fits(id)); renderPeriods(); }
+    else renderSlots();
+    refreshBar();
   } catch (e) {
     box.innerHTML = '';
     showError(e.message);
   }
 }
 
-function fits(id) {
-  const a = state.avail.find((x) => x.id === id);
+function fits(key) {
+  const a = state.avail.find((x) => x.key === key);
   return !!a && !a.past && a.remaining >= units();
 }
 
+/* 時段制 */
 function renderPeriods() {
   const box = $('#periods');
   box.innerHTML = '';
-  const ids = selected();
+  const ids = selectedPeriods();
   for (const p of state.cfg.periods) {
-    const a = state.avail.find((x) => x.id === p.id) || {};
+    const a = state.avail.find((x) => x.key === p.id) || {};
     const ok = fits(p.id);
     const b = document.createElement('button');
     b.type = 'button';
@@ -246,11 +355,11 @@ function renderPeriods() {
 }
 
 function renderCombo() {
-  const ids = selected();
+  const ids = selectedPeriods();
   const note = $('#comboNote');
   if (ids.length > 1) {
     const sum = ids.reduce((s, id) => s + state.loc.prices.single[id], 0);
-    const price = unitPrice(state.loc, ids);
+    const price = periodUnit(state.loc, ids);
     const per = state.loc.pricing === 'perPerson' ? '每人' : '';
     note.innerHTML = `已套用<b>${periodLabel(ids)}方案${per} $${price}</b>${sum > price ? `，比分開買${per}省 $${sum - price}` : ''}`;
     note.classList.remove('hidden');
@@ -264,10 +373,10 @@ function renderCombo() {
 function togglePeriod(id) {
   const all = PIDS();
   let sel = state.sel.includes(id) ? state.sel.filter((x) => x !== id) : [...state.sel, id];
-  let idx = all.filter((x) => sel.includes(x)).map((x) => all.indexOf(x));
-  // 取消中間的時段會斷開 → 只保留剛剛點的那一側
+  const idx = all.filter((x) => sel.includes(x)).map((x) => all.indexOf(x));
   if (idx.length > 1 && idx[idx.length - 1] - idx[0] + 1 !== idx.length) {
     if (!sel.includes(id)) {
+      // 取消中間的時段會斷開 → 只保留前面那一段
       const cut = all.indexOf(id);
       sel = sel.filter((x) => all.indexOf(x) < cut);
     } else {
@@ -287,12 +396,88 @@ function togglePeriod(id) {
   refreshBar();
 }
 
-function flash(msg) {
-  showError(msg);
-  clearTimeout(flash.t);
-  flash.t = setTimeout(() => showError(''), 3000);
+/* 時租制、諮詢：小時格子 */
+const slotAt = (h) => state.avail.find((s) => s.start === h);
+function rangeFits(a, b) {
+  for (let h = a; h <= b; h++) { const s = slotAt(h); if (!s || !fits(s.key)) return false; }
+  return true;
 }
-function clearTime() { state.sel = []; }
+
+function renderSlots() {
+  const box = $('#slots');
+  box.innerHTML = '';
+  if (!state.avail.length) {
+    box.innerHTML = `<p class="muted" style="grid-column:1/-1;margin:0">這天不開放線上預約${state.cfg.supportUrl ? '，假日或特殊需求請聯絡客服' : ''} 🙏</p>`;
+  } else if (!state.avail.some((s) => fits(s.key))) {
+    box.innerHTML = '<p class="muted" style="grid-column:1/-1;margin:0">這天已經沒有可預約的時間，請換一天 🙏</p>';
+  } else {
+    for (const s of state.avail) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      const ok = fits(s.key);
+      let cls = 'slot' + (s.after ? ' after' : '');
+      if (state.start != null) {
+        const end = state.endSlot ?? state.start;
+        if (s.start === state.start || s.start === end) cls += ' edge';
+        else if (s.start > state.start && s.start < end) cls += ' in';
+      }
+      b.className = cls;
+      b.disabled = !ok;
+      const sub = s.past ? '已過' : !ok ? '已預約' : state.loc.pricing === 'perPerson' ? `剩 ${s.remaining} 位` : s.after ? '營業時間外' : '可預約';
+      b.innerHTML = `${hh(s.start)}<small>${sub}</small>`;
+      b.addEventListener('click', () => tapSlot(s.start));
+      box.appendChild(b);
+    }
+  }
+  $('#tIn').textContent = state.start != null ? hh(state.start) : '—';
+  $('#tOut').textContent = state.endSlot != null ? hh(state.endSlot + 1) : '—';
+  renderQuote();
+}
+
+function tapSlot(h) {
+  if (mode() === 'consult') {
+    state.start = h; state.endSlot = h;
+  } else if (state.start == null || state.endSlot !== state.start || h < state.start) {
+    // 第一下＝入場；第二下（較晚的時段）＝最後一個小時；再點就重新選
+    state.start = h; state.endSlot = h;
+  } else if (h !== state.start) {
+    if (rangeFits(state.start, h)) state.endSlot = h;
+    else { state.start = h; state.endSlot = h; flash('中間有已被預約的時段，已幫你從這個時間重新開始選'); }
+  }
+  renderSlots();
+  updateQuote();
+}
+
+async function updateQuote() {
+  state.quote = null;
+  refreshBar();
+  if (mode() !== 'hourly' || state.start == null) { renderQuote(); return; }
+  const req = { location: state.loc.id, date: state.date, start: state.start, end: state.endSlot + 1, people: state.people };
+  const key = JSON.stringify(req);
+  updateQuote.key = key;
+  try {
+    const q = await post('/api/quote', req);
+    if (updateQuote.key !== key) return;
+    state.quote = q;
+    state.quoteError = '';
+  } catch (e) {
+    if (updateQuote.key !== key) return;
+    state.quoteError = e.message;
+  }
+  renderQuote();
+  refreshBar();
+}
+
+function renderQuote() {
+  const note = $('#comboNote');
+  if (mode() !== 'hourly' || state.start == null) { note.classList.add('hidden'); return; }
+  note.classList.remove('hidden');
+  if (state.quoteError && !state.quote) { note.innerHTML = `⚠️ ${esc(state.quoteError)}`; return; }
+  if (!state.quote) { note.textContent = '計算中…'; return; }
+  note.innerHTML = state.quote.lines.map((l) => `<div style="display:flex;justify-content:space-between;gap:8px"><span>${esc(l.label)}</span><b>${money(l.amount)}</b></div>`).join('');
+}
+
+function clearTime() { state.sel = []; state.start = null; state.endSlot = null; state.quote = null; state.quoteError = ''; }
 
 /* ---------- 3. 聯絡、發票 ---------- */
 function pickInv(v) {
@@ -302,16 +487,16 @@ function pickInv(v) {
 }
 
 function collect() {
-  return {
+  const body = {
     lineIdToken: state.line?.idToken,
     location: state.loc.id,
     date: state.date,
-    periods: selected(),
     people: state.people,
     customer: {
       name: $('#name').value.trim(),
       phone: $('#phone').value.trim(),
       email: $('#email').value.trim(),
+      company: $('#company').value.trim(),
       note: $('#note').value.trim(),
     },
     invoice: {
@@ -323,6 +508,10 @@ function collect() {
       loveCode: $('#loveCode').value.trim(),
     },
   };
+  if (mode() === 'periods') body.periods = selectedPeriods();
+  else { body.start = state.start; body.end = state.endSlot + 1; }
+  if (mode() === 'consult') body.topic = state.topic;
+  return body;
 }
 
 function checkStep3() {
@@ -331,10 +520,12 @@ function checkStep3() {
   if (b.customer.phone.replace(/\D/g, '').length < 8) return '請填寫正確的手機號碼';
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(b.customer.email)) return '請填寫正確的 Email';
   const i = b.invoice;
-  if (i.type === 'mobile' && !/^\/[0-9A-Z.+-]{7}$/i.test(i.carrier)) return '手機條碼格式為 / 開頭共 8 碼';
-  if (i.type === 'company' && !/^\d{8}$/.test(i.taxId)) return '統一編號需為 8 碼數字';
-  if (i.type === 'company' && !i.title) return '請填寫公司抬頭';
-  if (i.type === 'donate' && !/^\d{3,7}$/.test(i.loveCode)) return '捐贈碼為 3–7 碼數字';
+  if (!isFree()) {
+    if (i.type === 'mobile' && !/^\/[0-9A-Z.+-]{7}$/i.test(i.carrier)) return '手機條碼格式為 / 開頭共 8 碼';
+    if (i.type === 'company' && !/^\d{8}$/.test(i.taxId)) return '統一編號需為 8 碼數字';
+    if (i.type === 'company' && !i.title) return '請填寫公司抬頭';
+    if (i.type === 'donate' && !/^\d{3,7}$/.test(i.loveCode)) return '捐贈碼為 3–7 碼數字';
+  }
   try { localStorage.setItem('hj-contact', JSON.stringify(b.customer)); } catch {}
   return '';
 }
@@ -343,18 +534,24 @@ function checkStep3() {
 function renderSummary() {
   const b = collect();
   const d = new Date(b.date + 'T00:00:00Z');
-  const invText = { personal: '會員載具', mobile: '手機條碼 ' + b.invoice.carrier.toUpperCase(), company: `統編 ${b.invoice.taxId}`, donate: '捐贈 ' + b.invoice.loveCode }[b.invoice.type];
+  const br = branchOf(state.loc);
   const rows = [
-    ['地點', state.loc.name],
+    ['地點', (br ? br.name + ' ' : '') + state.loc.name],
     ['日期', `${b.date}（週${WEEK[d.getUTCDay()]}）`],
-    ['時段', periodLabel(b.periods)],
-    ['入場', hh(periodOf(b.periods[0]).start)],
-    ['出場', hh(periodOf(b.periods[b.periods.length - 1]).end)],
-    ['人數', `${b.people} 人`],
-    ['姓名', b.customer.name],
-    ['Email', b.customer.email],
-    ['發票', invText],
   ];
+  if (mode() === 'periods') {
+    const ids = selectedPeriods();
+    rows.push(['時段', periodLabel(ids)], ['入場', hh(periodOf(ids[0]).start)], ['出場', hh(periodOf(ids[ids.length - 1]).end)]);
+  } else if (mode() === 'consult') {
+    rows.push(['時間', hh(state.start)], ['項目', state.topic]);
+  } else {
+    rows.push(['入場', hh(state.start)], ['出場', hh(state.endSlot + 1)]);
+  }
+  if (mode() !== 'consult') rows.push(['人數', `${b.people} 人`]);
+  rows.push(['姓名', b.customer.name], ['Email', b.customer.email]);
+  if (!isFree()) {
+    rows.push(['發票', { personal: '會員載具', mobile: '手機條碼 ' + b.invoice.carrier.toUpperCase(), company: `統編 ${b.invoice.taxId}`, donate: '捐贈 ' + b.invoice.loveCode }[b.invoice.type]]);
+  }
   const dl = $('#summary');
   dl.innerHTML = '';
   for (const [k, v] of rows) {
@@ -362,7 +559,11 @@ function renderSummary() {
     const dd = document.createElement('dd'); dd.textContent = v;
     dl.append(dt, dd);
   }
-  $('#total').textContent = money(amount());
+  const lines = mode() === 'hourly' && state.quote ? state.quote.lines : [];
+  $('#lines').innerHTML = lines.map((l) => `<div><span>${esc(l.label)}</span><span>${money(l.amount)}</span></div>`).join('');
+  $('#lines').classList.toggle('hidden', !lines.length);
+  $('#total').textContent = isFree() ? '免費' : money(amount());
+  $('#payHint').classList.toggle('hidden', isFree());
 }
 
 async function pay() {
@@ -370,18 +571,15 @@ async function pay() {
   refreshBar();
   $('#next').textContent = '處理中…';
   try {
-    const r = await api('/api/create-order', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(collect()),
-    });
+    const r = await post('/api/create-order', collect());
+    if (r.free) { location.href = '/success.html?id=' + r.orderId; return; }
     submitToECPay(r.form);
   } catch (e) {
     state.busy = false;
-    $('#next').textContent = '前往付款';
+    $('#next').textContent = isFree() ? '確認預約' : '前往付款';
     refreshBar();
     showError(e.message);
-    if (/額滿|訂走|已經過/.test(e.message)) { go(2); loadSlots(); }
+    if (/額滿|訂走|已經結束/.test(e.message)) { go(2); loadSlots(); }
   }
 }
 
@@ -406,24 +604,26 @@ window.addEventListener('pageshow', (e) => {
 
 (async function init() {
   try {
-    $('#brand').innerHTML = icon('leaf') + 'Hour Jungle';
     state.cfg = await api('/api/config');
+    applyBrand();
     $('#holdMin').textContent = state.cfg.holdMinutes;
     try {
       const c = JSON.parse(localStorage.getItem('hj-contact') || 'null');
       if (c) { $('#name').value = c.name || ''; $('#phone').value = c.phone || ''; $('#email').value = c.email || ''; }
     } catch {}
     renderVenue();
+    // QR code 可帶 ?branch=xxx 只顯示某館，或 ?loc=xxx 直接進到指定空間
+    const q = new URLSearchParams(location.search);
+    if (state.cfg.branches.some((b) => b.id === q.get('branch'))) state.branch = q.get('branch');
+    renderBranchTabs();
     renderLocations();
+    renderDates();
     initLine(state.cfg.liffId).then((line) => {
       state.line = line;
       if (line && !$('#name').value) $('#name').value = line.name;
     });
-    // QR code 可帶 ?loc=meeting 直接進到指定地點
-    const pre = new URLSearchParams(location.search).get('loc');
-    const loc = state.cfg.locations.find((l) => l.id === pre);
-    renderDates();
-    if (loc) { state.loc = loc; renderLocations(); go(2); renderPriceTable(); loadSlots(); }
+    const loc = state.cfg.locations.find((l) => l.id === q.get('loc'));
+    if (loc) selectLocation(loc);
     else go(1);
   } catch (e) {
     $('#locations').innerHTML = '';

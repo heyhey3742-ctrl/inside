@@ -5,7 +5,7 @@ import path from 'node:path';
 
 class FileStore {
   constructor(name) {
-    this.dir = path.join(process.cwd(), '.data', name);
+    this.dir = path.join(process.cwd(), '.data', process.env.SITE || 'cafe', name);
   }
   file(key) {
     return path.join(this.dir, encodeURIComponent(key) + '.json');

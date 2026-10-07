@@ -27,11 +27,11 @@
 </div>
 <script src="/icons.js"></script>
 <script src="/pay.js"></script>
+<script src="/brand.js"></script>
 <script src="/support.js"></script>
 <script>
 const q = new URLSearchParams(location.search);
 const id = q.get('id');
-document.getElementById('brand').innerHTML = icon('leaf') + 'Hour Jungle';
 const $ = (s) => document.querySelector(s);
 const reasons = { cancel: '你取消了付款。', verify: '付款資料驗證失敗，請重新付款。', notfound: '找不到這筆預約。' };
 const r = q.get('reason');
@@ -43,7 +43,7 @@ function showErr(m) { const e = $('#error'); e.textContent = m; e.classList.remo
   const o = await res.json();
   if (!res.ok) return;
   if (o.status === 'paid') return location.replace('/success.html?id=' + o.id);
-  const rows = [['預約編號', o.id], ['地點', o.locationName], ['日期', o.date], ['時段', o.periodLabel + '（' + hh(o.start) + '–' + hh(o.end) + '）'], ['人數', o.people + ' 人']];
+  const rows = [['預約編號', o.id], ['地點', o.locationName], ['日期', o.date], ['時段', o.slotLabel], ['人數', o.people + ' 人']];
   for (const [k, v] of rows) {
     const dt = document.createElement('dt'); dt.textContent = k;
     const dd = document.createElement('dd'); dd.textContent = v;
