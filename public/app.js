@@ -362,9 +362,8 @@ function renderSlots() {
       const last = slotAt(h - 1);
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'slot' + (state.endSlot === h - 1 ? ' edge' : '');
-      const hours = h - state.start;
-      b.innerHTML = `${hh(h)}<small>共 ${hours} 小時${last.after ? '・含營業時間外' : ''}</small>`;
+      b.className = 'slot' + (last.after ? ' after' : '') + (state.endSlot === h - 1 ? ' edge' : '');
+      b.innerHTML = `${hh(h)}<small>共 ${h - state.start} 小時</small>`;
       if (last.period) b.dataset.period = last.period;
       b.addEventListener('click', () => pickEnd(h));
       ends.appendChild(b);
