@@ -10,6 +10,10 @@ const ORIGIN = `http://localhost:${PORT}`;
 process.env.ECPAY_CHECKOUT_URL ||= `${ORIGIN}/__mock/ecpay`;
 process.env.INVOICE_BASE_URL ||= `${ORIGIN}/__mock/invoice`;
 process.env.ADMIN_PASSWORD ||= 'admin';
+// 假 LINE：LIFF 與推播都在本機模擬
+process.env.LIFF_ID ||= 'dev-mock';
+process.env.LINE_CHANNEL_ACCESS_TOKEN ||= 'dev-token';
+process.env.LINE_API_BASE ||= `${ORIGIN}/__mock/line`;
 
 const { checkMacValue } = await import('./netlify/lib/ecpay.mjs');
 const { encrypt, decrypt } = await import('./netlify/lib/invoice.mjs');
@@ -21,7 +25,8 @@ const dir = path.resolve('netlify/functions');
 for (const f of await fs.readdir(dir)) {
   if (!f.endsWith('.mjs')) continue;
   const mod = await import(pathToFileURL(path.join(dir, f)));
-  routes[mod.config.path] = mod.default;
+  if (mod.config.path) routes[mod.config.path] = mod.default;
+  else if (mod.config.schedule) routes[`/__dev/${f.replace('.mjs', '')}`] = mod.default; // 排程：手動觸發
 }
 
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png' };
@@ -88,9 +93,28 @@ async function mockInvoice(request, url) {
   return Response.json({ MerchantID: cfg.merchantId, RpHeader: { Timestamp: 0 }, TransCode: 1, TransMsg: 'Success', Data: encrypt(out, cfg) });
 }
 
+const linePushes = [];
+async function mockLine(request, url) {
+  if (url.pathname.endsWith('/oauth2/v2.1/verify')) {
+    const p = new URLSearchParams(await request.text());
+    const tok = p.get('id_token') || '';
+    if (!tok.startsWith('test-')) return Response.json({ error: 'invalid_request' }, { status: 400 });
+    return Response.json({ sub: tok.slice(5), name: 'LINE 測試用戶' });
+  }
+  if (url.pathname.endsWith('/v2/bot/message/push')) {
+    const body = await request.json();
+    linePushes.push(body);
+    console.log('[假 LINE 推播]', body.to, body.messages.map((m) => m.altText).join(' / '));
+    return Response.json({});
+  }
+  if (url.pathname.endsWith('/pushes')) return Response.json(linePushes);
+  return new Response('not found', { status: 404 });
+}
+
 http.createServer(async (req, res) => {
   try {
     const url = new URL(ORIGIN + req.url);
+    if (url.pathname.startsWith('/__mock/line')) return send(res, await mockLine(await toRequest(req), url));
     if (url.pathname === '/__mock/ecpay') return send(res, await mockEcpay(await toRequest(req)));
     if (url.pathname.startsWith('/__mock/invoice')) return send(res, await mockInvoice(await toRequest(req), url));
     const fn = routes[url.pathname];

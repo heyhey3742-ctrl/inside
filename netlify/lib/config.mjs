@@ -140,3 +140,20 @@ export function invoiceConfig() {
 export function adminPassword() {
   return env('ADMIN_PASSWORD', '');
 }
+
+// LINE 設定：三個值都填了才會啟用 LINE 功能
+export function lineConfig() {
+  const liffId = env('LIFF_ID', '');
+  const loginChannelId = env('LINE_LOGIN_CHANNEL_ID', '') || liffId.split('-')[0];
+  const accessToken = env('LINE_CHANNEL_ACCESS_TOKEN', '');
+  return {
+    liffId,
+    loginChannelId,
+    accessToken,
+    apiBase: env('LINE_API_BASE', 'https://api.line.me'),
+    // 官方帳號 ID（例如 @hourjungle），用來顯示「聯絡客服」按鈕
+    oaId: env('LINE_OA_ID', ''),
+    loginEnabled: !!liffId,
+    pushEnabled: !!accessToken,
+  };
+}

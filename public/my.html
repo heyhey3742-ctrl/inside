@@ -15,7 +15,7 @@
 </header>
 <div class="wrap">
   <div id="recent" class="hidden" style="margin-top:22px">
-    <h2>這支手機的預約</h2>
+    <h2>我的預約</h2>
     <div id="recentList"></div>
   </div>
   <h2>用預約編號查詢</h2>
@@ -31,6 +31,8 @@
 </div>
 <script src="/icons.js"></script>
 <script src="/pay.js"></script>
+<script src="/support.js"></script>
+<script src="/line.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 $('#brand').innerHTML = icon('leaf') + 'Hour Jungle';
@@ -43,10 +45,20 @@ $('#f').addEventListener('submit', async (e) => {
   $('#error').classList.remove('hidden');
 });
 (async () => {
+  let list = [];
+  // 在 LINE 裡開啟：直接用 LINE 身分列出預約
+  const cfg = await fetch('/api/config').then((r) => r.json()).catch(() => ({}));
+  const line = await initLine(cfg.liffId);
+  if (line) {
+    const r = await fetch('/api/my', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken: line.idToken }) });
+    if (r.ok) list = (await r.json()).orders;
+  }
   let ids = [];
   try { ids = JSON.parse(localStorage.getItem('hj-bookings') || '[]'); } catch {}
-  const list = (await Promise.all(ids.map((id) => fetch('/api/order?id=' + id).then((r) => r.ok ? r.json() : null).catch(() => null))))
+  const seen = new Set(list.map((o) => o.id));
+  const local = (await Promise.all(ids.filter((id) => !seen.has(id)).map((id) => fetch('/api/order?id=' + id).then((r) => r.ok ? r.json() : null).catch(() => null))))
     .filter((o) => o && o.status === 'paid');
+  list = [...list, ...local];
   if (!list.length) return;
   $('#recent').classList.remove('hidden');
   for (const o of list) {

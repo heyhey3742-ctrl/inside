@@ -1,7 +1,7 @@
 const $ = (s) => document.querySelector(s);
 const state = {
   cfg: null, step: 1, loc: null, people: 1, date: null,
-  avail: [], sel: [], invType: 'personal', busy: false,
+  avail: [], sel: [], invType: 'personal', busy: false, line: null,
 };
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -303,6 +303,7 @@ function pickInv(v) {
 
 function collect() {
   return {
+    lineIdToken: state.line?.idToken,
     location: state.loc.id,
     date: state.date,
     periods: selected(),
@@ -414,6 +415,10 @@ window.addEventListener('pageshow', (e) => {
     } catch {}
     renderVenue();
     renderLocations();
+    initLine(state.cfg.liffId).then((line) => {
+      state.line = line;
+      if (line && !$('#name').value) $('#name').value = line.name;
+    });
     // QR code 可帶 ?loc=meeting 直接進到指定地點
     const pre = new URLSearchParams(location.search).get('loc');
     const loc = state.cfg.locations.find((l) => l.id === pre);

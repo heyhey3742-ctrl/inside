@@ -34,11 +34,15 @@
 </div>
 <script>
 const sel = document.getElementById('target');
+let liffId = null;
 fetch('/api/config').then((r) => r.json()).then((c) => {
   for (const l of c.locations) sel.add(new Option(l.name + '（直接進入）', l.id));
+  // 有設定 LINE 時，QR code 會打開 LINE 版預約（順便加好友）
+  if (c.liffId && c.liffId !== 'dev-mock') { liffId = c.liffId; draw(); }
 });
 function draw() {
-  const url = location.origin + '/' + (sel.value ? '?loc=' + sel.value : '');
+  const base = liffId ? `https://liff.line.me/${liffId}/` : location.origin + '/';
+  const url = base + (sel.value ? '?loc=' + sel.value : '');
   const qr = qrcode(0, 'M');
   qr.addData(url);
   qr.make();

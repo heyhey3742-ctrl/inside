@@ -55,6 +55,7 @@ function store(name) {
 
 export const orders = () => store('orders');
 export const days = () => store('days');
+export const users = () => store('users');
 
 export async function readJSON(st, key) {
   const r = await st.getWithMetadata(key, { type: 'json' });

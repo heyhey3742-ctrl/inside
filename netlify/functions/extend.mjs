@@ -6,7 +6,7 @@ import { json, handle, originOf } from '../lib/http.mjs';
 export default handle(async (req) => {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
   const { id } = await req.json();
-  const order = await createExtension(String(id || ''));
+  const order = await createExtension(String(id || ''), originOf(req));
   const form = checkoutForm({ order, tradeNo: tradeNoFor(order.id, 1), origin: originOf(req) });
   return json({ orderId: order.id, amount: order.amount, form });
 });

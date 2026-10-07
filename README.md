@@ -69,6 +69,35 @@
 2. 在 Netlify 填入上面的環境變數，並把 `ECPAY_ENV` 設為 `prod`
 3. 重新部署，到 `/qr.html` 印出 QR code
 
+## 綁定 LINE 官方帳號
+
+綁定後：在 LINE 裡預約（自動帶入 LINE 名字、用 LINE 帳號當客人 ID）、付款成功推播入場密碼、時段結束前 30 分鐘推播加訂提醒、在 LINE 查詢我的預約、「聯絡客服」按鈕直接開 LINE 聊天。
+
+**需要先部署到 Netlify，拿到網址（例如 `https://xxx.netlify.app`）。**
+
+1. **開啟 Messaging API**：[LINE 官方帳號管理後台](https://manager.line.biz) → 設定 → Messaging API → 啟用 → 建立提供者（Provider），名稱填 Hour Jungle
+2. **取得推播金鑰**：[LINE Developers](https://developers.line.biz/console/) → 選剛剛的 Provider → Messaging API channel → 「Messaging API」分頁最下面 → Channel access token → Issue，複製下來
+3. **建立 LIFF**：同一個 Provider → Create a new channel → **LINE Login** → 建好後進「LIFF」分頁 → Add：
+   - Size：Full
+   - Endpoint URL：你的 Netlify 網址（例如 `https://xxx.netlify.app/`）
+   - Scopes：勾 `openid`、`profile`
+   - Add friend option：**On (Aggressive)**（預約時自動邀請加好友）
+   - 建好後複製 **LIFF ID**（長得像 `2008xxxxxx-AbCdEfGh`）
+4. 把 LINE Login channel 狀態從 **Developing 改成 Published**（不然只有測試人員能用）
+5. 到 Netlify 環境變數新增：
+
+| 名稱 | 填什麼 |
+|---|---|
+| `LIFF_ID` | 步驟 3 的 LIFF ID |
+| `LINE_CHANNEL_ACCESS_TOKEN` | 步驟 2 的 Channel access token |
+| `LINE_OA_ID` | 官方帳號的 ID，例如 `@hourjungle`（含 @） |
+
+6. 重新部署
+7. **設定圖文選單**（官方帳號後台 → 圖文選單），按鈕連結：
+   - 立即預約：`https://liff.line.me/你的LIFF_ID`
+   - 我的預約：`https://liff.line.me/你的LIFF_ID/my.html`
+8. 到 `/qr.html` 重新產生 QR code，會自動變成 LINE 版連結
+
 ## 修改場地、價格、時段
 
 全部在 `netlify/lib/config.mjs`：
