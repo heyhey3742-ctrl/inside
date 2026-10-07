@@ -52,13 +52,14 @@ async function accessToken() {
   return cached.token;
 }
 
-async function call(path, body) {
+async function call(path, body, method) {
   const res = await fetch(apiBase() + path, {
-    method: body ? 'POST' : 'GET',
+    method: method || (body ? 'POST' : 'GET'),
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await accessToken()}` },
     body: body ? JSON.stringify(body) : undefined,
   });
   const d = await res.json().catch(() => ({}));
+  if (method === 'DELETE' && (res.status === 404 || res.status === 410)) return {};
   if (!res.ok) throw new Error(`Google 日曆錯誤 ${res.status}：${JSON.stringify(d.error || d)}`);
   return d;
 }
@@ -102,4 +103,9 @@ export async function insertEvent(loc, { date, start, end, summary, description 
     end: { dateTime: iso(date, end), timeZone: 'Asia/Taipei' },
   });
   return d.id || null;
+}
+
+export async function deleteEvent(loc, eventId) {
+  if (!eventId || !enabledFor(loc)) return;
+  await call(`/calendar/v3/calendars/${encodeURIComponent(calendarIdFor(loc))}/events/${encodeURIComponent(eventId)}`, null, 'DELETE');
 }

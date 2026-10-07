@@ -66,7 +66,7 @@ export function accessMessage({ order, group, origin }) {
         type: 'box', layout: 'vertical', spacing: 'sm', contents: [
           { type: 'text', text: order.extendOf ? '加訂成功，密碼不變 ✅' : '預約成功 ✅', weight: 'bold', size: 'md' },
           row('地點', order.locationName),
-          row('時段', `${order.slotLabel}（${hh(order.start)}–${hh(order.end)}）`),
+          row('時段', order.slotLabel),
           row('人數', `${order.people} 人`),
           row('金額', `NT$ ${order.amount.toLocaleString('zh-TW')}`),
           row('編號', order.id),

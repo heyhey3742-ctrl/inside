@@ -1,17 +1,19 @@
 // 預約核心邏輯：查空位、建立訂單、付款成功／失敗處理
 import crypto from 'node:crypto';
 import {
-  BRAND, FEATURES, VENUE, PERIODS, BRANCHES, LOCATIONS, MAX_DAYS_AHEAD, HOLD_MINUTES,
+  BRAND, FEATURES, VENUE, PERIODS, BRANCHES, LOCATIONS, MAX_DAYS_AHEAD, HOLD_MINUTES, POLICY,
   getLocation, getBranch, unitsFor, lineConfig, SITE,
 } from './config.mjs';
 import {
   UserError, hh, slotsFor, selectionFrom, rangeOf, labelFor, quote, priceTable, isWeekend,
+  periodsTouched, periodNames,
 } from './modes.mjs';
 import { taipeiNow, daysBetween, isValidDate } from './time.mjs';
 import { orders, days, users, readJSON, updateJSON } from './db.mjs';
-import { issueInvoice } from './invoice.mjs';
+import { issueInvoice, voidInvoice } from './invoice.mjs';
+import { refundPayment } from './ecpay.mjs';
 import { push, accessMessage, confirmMessage, reminderMessage } from './line.mjs';
-import { busyHours, insertEvent } from './gcal.mjs';
+import { busyHours, insertEvent, deleteEvent } from './gcal.mjs';
 
 export { UserError };
 
@@ -60,7 +62,7 @@ export async function availability(locId, date) {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function validateInput(body) {
+export function validateInput(body, { paidPeriods } = {}) {
   const loc = getLocation(body.location);
   if (!loc) throw new UserError('請選擇地點');
   const { date } = body;
@@ -95,7 +97,7 @@ export function validateInput(body) {
   const topic = loc.topics ? String(body.topic || '') : '';
   if (loc.topics && !loc.topics.includes(topic)) throw new UserError('請選擇諮詢項目');
 
-  const q = quote(loc, date, slots, people);
+  const q = quote(loc, date, slots, people, { paidPeriods });
 
   const i = body.invoice || {};
   let invoice = { type: 'personal' };
@@ -124,6 +126,7 @@ export function validateInput(body) {
   return {
     loc, date, slots, people, customer, invoice, topic, start, end,
     amount: q.amount, lines: q.lines,
+    label: paidPeriods ? `${hh(start)}–${hh(end)}（加訂${periodNames(q.periods)}）` : labelFor(loc, slots),
     units: unitsFor(loc, people),
   };
 }
@@ -143,8 +146,8 @@ function placeName(loc) {
   return b ? `${b.name} ${loc.name}` : loc.name;
 }
 
-export async function createOrder(body, { extendOf, line, origin } = {}) {
-  const v = validateInput(body);
+export async function createOrder(body, { extendOf, paidPeriods, line, origin } = {}) {
+  const v = validateInput(body, { paidPeriods });
   const id = 'HJ' + taipeiNow().date.replace(/-/g, '').slice(2) +
     crypto.randomBytes(4).toString('hex').toUpperCase();
   const holdUntil = Date.now() + HOLD_MINUTES * 60 * 1000;
@@ -163,7 +166,7 @@ export async function createOrder(body, { extendOf, line, origin } = {}) {
     return doc;
   }, { bookings: [] });
 
-  const label = labelFor(v.loc, v.slots);
+  const label = v.label;
   const order = {
     id,
     site: SITE.id,
@@ -346,8 +349,7 @@ export async function sendReminders(now = Date.now()) {
       }
       for (const [gid, members] of groups) {
         if (members.some((m) => m.reminded)) continue;
-        const ids = PERIODS.map((p) => p.id).filter((id) => members.some((m) => m.slots.includes(id)));
-        const end = PERIODS.find((p) => p.id === ids[ids.length - 1]).end;
+        const end = Math.max(...members.flatMap((m) => m.slots.map((k) => Number(k.slice(1)) + 1)));
         const endAt = Date.parse(`${date}T00:00:00+08:00`) + end * 3600000;
         const left = endAt - now;
         if (left <= 0 || left > 30 * 60000) continue;
@@ -417,26 +419,29 @@ export async function groupInfo(order) {
   const keys = slotsFor(loc, order.date).map((s) => s.key)
     .filter((k) => members.some((m) => m.slots.includes(k)) || order.slots.includes(k));
   const { start, end } = rangeOf(loc, order.date, keys);
-  return { slots: keys, label: labelFor(loc, keys), start, end, count: Math.max(members.length, 1) };
+  const periods = loc.mode === 'periods' ? periodsTouched(start, end) : [];
+  return { slots: keys, periods, label: periods.length ? periodNames(periods) : labelFor(loc, keys), start, end, count: Math.max(members.length, 1) };
 }
 
 /* ---------- 加訂下一個時段（分開計價，不套用多時段優惠） ---------- */
 
+// 下一個還沒付過的時段：從目前出場時間延長到那個時段結束
 export async function nextPeriodFor(order, group) {
   if (!FEATURES.extend || order.mode !== 'periods') return null;
-  const lastIdx = PERIODS.findIndex((p) => p.id === group.slots[group.slots.length - 1]);
+  const lastIdx = PERIODS.findIndex((p) => p.id === group.periods[group.periods.length - 1]);
   const next = PERIODS[lastIdx + 1];
   if (!next) return null;
   const loc = getLocation(order.location);
   const av = await availability(order.location, order.date);
-  const slot = av.slots.find((s) => s.key === next.id);
+  const units = unitsFor(loc, order.people);
+  const hours = av.slots.filter((s) => s.start >= group.end && s.start < next.end);
   return {
     id: next.id,
     name: next.name,
-    start: next.start,
+    start: group.end,
     end: next.end,
-    amount: quote(loc, order.date, [next.id], order.people).amount,
-    available: !slot.past && slot.remaining >= unitsFor(loc, order.people),
+    amount: quote(loc, order.date, hours.map((s) => s.key), order.people, { paidPeriods: group.periods }).amount,
+    available: hours.length > 0 && hours.every((s) => !s.past && s.remaining >= units),
   };
 }
 
@@ -450,11 +455,12 @@ export async function createExtension(parentId, origin) {
   return createOrder({
     location: parent.location,
     date: parent.date,
-    periods: [next.id],
+    start: next.start,
+    end: next.end,
     people: parent.people,
     customer: parent.customer,
     invoice: parent.invoice,
-  }, { extendOf: parent.access.groupId, line: parent.line, origin });
+  }, { extendOf: parent.access.groupId, paidPeriods: group.periods, line: parent.line, origin });
 }
 
 /* ---------- 發票、失敗 ---------- */
@@ -489,6 +495,139 @@ export async function markFailed(id, reason) {
   return order;
 }
 
+/* ---------- 改期、取消退款 ---------- */
+
+const startAt = (o) => Date.parse(`${o.date}T00:00:00+08:00`) + o.start * 3600000;
+
+// 客人自己能不能改期／退款（後台不受限制）
+export function selfService(o, now = Date.now()) {
+  const before = (h) => now < startAt(o) - h * 3600000;
+  const single = !o.access || o.access.groupId === o.id && !o.extendOf;
+  const canChange = o.status === 'paid' && single && (o.changes || 0) < POLICY.maxChanges && before(POLICY.changeHours);
+  const canCancel = o.status === 'paid' && single && before(POLICY.refundHours);
+  const reason = !single ? '已加訂的預約請聯絡客服改期或取消'
+    : !before(Math.min(POLICY.changeHours, POLICY.refundHours)) ? '已超過可以自己改期／取消的時間，請聯絡客服'
+    : !canChange ? `已改期過 ${o.changes} 次，如需再次改期請聯絡客服` : '';
+  return { canChange, canCancel, reason, policy: POLICY };
+}
+
+function checkPhone(o, tail) {
+  if (!tail || !o.customer.phone.endsWith(String(tail))) throw new UserError('手機末三碼不正確');
+}
+
+async function lineText(order, text) {
+  if (order.line?.userId) await push(order.line.userId, [{ type: 'text', text }]);
+}
+
+export async function cancelOrder(id, { phone, byAdmin = false, reason = '客人取消預約' } = {}) {
+  const order = await readJSON(orders(), id);
+  if (!order) throw new UserError('找不到這筆預約');
+  if (!byAdmin) {
+    checkPhone(order, phone);
+    const ss = selfService(order);
+    if (!ss.canCancel) {
+      throw new UserError(order.status !== 'paid' ? '這筆預約無法取消'
+        : `開始前 ${POLICY.refundHours} 小時內無法線上取消，請聯絡客服`);
+    }
+  }
+  // 先鎖定，避免重複退款
+  let mine = false;
+  await updateJSON(orders(), id, (o) => {
+    if (o.status !== 'paid') return undefined;
+    o.status = 'cancelling';
+    mine = true;
+    return o;
+  });
+  if (!mine) throw new UserError('這筆預約已經在處理中或已取消');
+
+  let refund = null;
+  try {
+    if (order.amount > 0) refund = await refundPayment(order);
+  } catch (e) {
+    await updateJSON(orders(), id, (o) => { o.status = 'paid'; o.refundError = e.message; return o; });
+    throw new UserError(`${e.message}，請聯絡客服協助退款`);
+  }
+
+  const loc = getLocation(order.location);
+  await updateJSON(orders(), id, (o) => {
+    o.status = 'cancelled';
+    o.cancelledAt = new Date().toISOString();
+    o.cancelReason = reason;
+    o.cancelledBy = byAdmin ? 'admin' : 'customer';
+    o.refund = refund || { free: true };
+    delete o.refundError;
+    return o;
+  });
+  await setDayStatus(order, 'cancelled');
+  try { await deleteEvent(loc, order.calendar?.eventId); } catch (e) { console.error('刪除日曆失敗', e.message); }
+  try {
+    const v = await voidInvoice(order, reason);
+    await updateJSON(orders(), id, (o) => { o.invoiceVoid = v; return o; });
+  } catch (e) {
+    await updateJSON(orders(), id, (o) => { o.invoiceVoidError = e.message; return o; });
+  }
+  await lineText(order, `預約已取消：${order.locationName} ${order.date} ${order.slotLabel}` +
+    (order.amount ? `\nNT$ ${order.amount} 已退回原信用卡（依發卡銀行作業約 7–14 天入帳）` : ''));
+  return readJSON(orders(), id);
+}
+
+export async function rescheduleOrder(id, newDate, { phone, byAdmin = false } = {}) {
+  const order = await readJSON(orders(), id);
+  if (!order) throw new UserError('找不到這筆預約');
+  if (!byAdmin) {
+    checkPhone(order, phone);
+    if (!selfService(order).canChange) {
+      throw new UserError(order.status !== 'paid' ? '這筆預約無法改期'
+        : (order.changes || 0) >= POLICY.maxChanges ? `每筆預約只能改期 ${POLICY.maxChanges} 次，請聯絡客服`
+        : `開始前 ${POLICY.changeHours} 小時內無法線上改期，請聯絡客服`);
+    }
+  }
+  if (!isValidDate(newDate) || newDate === order.date) throw new UserError('請選擇新的日期');
+  const now = taipeiNow();
+  const ahead = daysBetween(now.date, newDate);
+  if (ahead < 0 || ahead > MAX_DAYS_AHEAD) throw new UserError(`請選擇 ${MAX_DAYS_AHEAD} 天內的日期`);
+
+  const loc = getLocation(order.location);
+  const keys = order.slots;
+  const valid = new Set(slotsFor(loc, newDate).map((x) => x.key));
+  if (!keys.every((k) => valid.has(k))) throw new UserError('新日期在這個時間不開放，請選其他日期');
+  if (slotsFor(loc, newDate).filter((x) => keys.includes(x.key)).some((x) => isPast(newDate, x, now))) {
+    throw new UserError('新的時間已經過了');
+  }
+  const q = quote(loc, newDate, keys, order.people);
+  if (q.amount !== order.amount) {
+    throw new UserError(`新日期的價格不同（NT$ ${q.amount}，原本 NT$ ${order.amount}，例如平日改假日），請取消後重新預約`);
+  }
+  const units = unitsFor(loc, order.people);
+  const blocked = await calendarBlocked(loc, newDate);
+  // 先佔新日期，成功後才釋放舊日期
+  await updateJSON(days(), dayKey(loc.id, newDate), (doc) => {
+    const used = usage(doc);
+    for (const k of keys) {
+      if (blocked.has(k) || (used[k] || 0) + units > loc.capacity) throw new UserError('新日期這個時間已經額滿');
+    }
+    doc.bookings = doc.bookings.filter((b) => isActive(b) && b.id !== id);
+    doc.bookings.push({ id, slots: keys, units, status: 'paid', group: order.access ? id : undefined });
+    return doc;
+  }, { bookings: [] });
+  await setDayStatus(order, 'moved');
+
+  const oldDate = order.date;
+  const updated = await updateJSON(orders(), id, (o) => {
+    o.date = newDate;
+    o.changes = (o.changes || 0) + 1;
+    o.history = [...(o.history || []), { from: oldDate, to: newDate, at: new Date().toISOString(), by: byAdmin ? 'admin' : 'customer' }];
+    o.itemName = o.itemName.replace(oldDate, newDate);
+    if (o.access) o.access = { ...o.access, groupId: id };
+    delete o.calendar;
+    return o;
+  });
+  try { await deleteEvent(loc, order.calendar?.eventId); } catch (e) { console.error('刪除日曆失敗', e.message); }
+  await addToCalendar(updated);
+  await lineText(updated, `預約已改期 ✅\n${updated.locationName}\n${oldDate} → ${newDate}　${updated.slotLabel}`);
+  return readJSON(orders(), id);
+}
+
 /* ---------- 給前台的資料 ---------- */
 
 export function publicOrder(o) {
@@ -510,6 +649,10 @@ export function publicOrder(o) {
     failReason: o.failReason,
     invoiceNo: o.invoiceResult?.invoiceNo,
     email: o.customer.email.replace(/^(.).*(@.*)$/, '$1***$2'),
+    changes: o.changes || 0,
+    refund: o.refund ? { action: o.refund.action, free: o.refund.free } : undefined,
+    cancelledAt: o.cancelledAt,
+    ...(o.status === 'paid' ? selfService(o) : { policy: POLICY }),
   };
 }
 
@@ -524,6 +667,7 @@ export function publicConfig() {
     branches: BRANCHES,
     maxDaysAhead: MAX_DAYS_AHEAD,
     holdMinutes: HOLD_MINUTES,
+    policy: POLICY,
     today: taipeiNow().date,
     locations: LOCATIONS.map((l) => ({ ...l, calendarEnv: undefined, priceTable: priceTable(l) })),
     liffId: lc.liffId || null,

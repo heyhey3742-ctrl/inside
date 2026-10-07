@@ -108,6 +108,8 @@ export default {
     },
   },
   features: { accessCode: false, extend: false },
+  // 改期／退款規則：開始前 N 小時以前可以自己線上操作
+  policy: { changeHours: 24, refundHours: 24, maxChanges: 1 },
   venue: {
     title: '全台共享辦公空間',
     intro: '台北、台中、台南多個據點，提供共同工作空間、會議室、教室與獨立辦公室。線上預約、刷卡付款、電子發票一次完成。',

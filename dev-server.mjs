@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 const PORT = Number(process.env.PORT || 8888);
 const ORIGIN = `http://localhost:${PORT}`;
 process.env.ECPAY_CHECKOUT_URL ||= `${ORIGIN}/__mock/ecpay`;
+process.env.ECPAY_ACTION_URL ||= `${ORIGIN}/__mock/ecpay-action`;
 process.env.INVOICE_BASE_URL ||= `${ORIGIN}/__mock/invoice`;
 process.env.ADMIN_PASSWORD ||= 'admin';
 // 假 LINE：LIFF 與推播都在本機模擬
@@ -124,6 +125,12 @@ async function mockGoogle(request, url) {
     }
     return Response.json({ calendars });
   }
+  const del = url.pathname.match(/calendars\/([^/]+)\/events\/([^/]+)$/);
+  if (del && request.method === 'DELETE') {
+    const i = gEvents.findIndex((e) => e.id === decodeURIComponent(del[2]));
+    if (i >= 0) { console.log('[假 Google 日曆] 刪除', gEvents[i].summary); gEvents.splice(i, 1); }
+    return new Response(null, { status: 204 });
+  }
   const m = url.pathname.match(/calendars\/([^/]+)\/events$/);
   if (m && request.method === 'GET') {
     const id = decodeURIComponent(m[1]);
@@ -166,6 +173,15 @@ http.createServer(async (req, res) => {
     const url = new URL(ORIGIN + req.url);
     if (url.pathname.startsWith('/__mock/google')) return send(res, await mockGoogle(await toRequest(req), url));
     if (url.pathname.startsWith('/__mock/line')) return send(res, await mockLine(await toRequest(req), url));
+    if (url.pathname === '/__mock/ecpay-action') {
+      // 假綠界退款：驗證簽章後回覆成功
+      const r = await toRequest(req);
+      const p = Object.fromEntries(new URLSearchParams(await r.text()));
+      const ok = checkMacValue(p, ecpayConfig()) === p.CheckMacValue;
+      console.log('[假綠界退款]', p.Action, p.MerchantTradeNo, p.TotalAmount, ok ? '簽章正確' : '簽章錯誤');
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      return res.end(new URLSearchParams({ MerchantID: p.MerchantID, MerchantTradeNo: p.MerchantTradeNo, TradeNo: p.TradeNo, RtnCode: ok ? '1' : '0', RtnMsg: ok ? '成功' : 'CheckMacValue Error' }).toString());
+    }
     if (url.pathname === '/__mock/ecpay') return send(res, await mockEcpay(await toRequest(req)));
     if (url.pathname.startsWith('/__mock/invoice')) return send(res, await mockInvoice(await toRequest(req), url));
     const fn = routes[url.pathname];

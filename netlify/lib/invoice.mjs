@@ -106,3 +106,17 @@ export async function issueInvoice(order) {
   }
   return { invoiceNo: r.InvoiceNo, invoiceDate: r.InvoiceDate, randomNumber: r.RandomNumber };
 }
+
+// 作廢發票（同一期內可作廢；跨期需要到綠界後台開折讓單）
+export async function voidInvoice(order, reason = '客人取消預約') {
+  const cfg = invoiceConfig();
+  const inv = order.invoiceResult;
+  if (!cfg.enabled || !inv?.invoiceNo) return { skipped: true };
+  const r = await call('/B2CInvoice/Invalid', {
+    InvoiceNo: inv.invoiceNo,
+    InvoiceDate: String(inv.invoiceDate || '').slice(0, 10),
+    Reason: reason,
+  }, cfg);
+  if (r.RtnCode !== 1) throw new Error(`發票作廢失敗：${r.RtnMsg}（跨期發票請到綠界後台開立折讓）`);
+  return { voided: true, at: new Date().toISOString() };
+}

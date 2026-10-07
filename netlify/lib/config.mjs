@@ -15,6 +15,7 @@ export const PERIODS = SITE.periods;
 export const BRANCHES = SITE.branches;
 export const LOCATIONS = SITE.locations;
 export const HOLIDAYS = SITE.holidays || [];
+export const POLICY = SITE.policy || { changeHours: 24, refundHours: 24, maxChanges: 1 };
 
 export const MAX_DAYS_AHEAD = 60; // 最多可預約幾天後
 export const HOLD_MINUTES = 20;   // 付款未完成時，時段先保留幾分鐘
@@ -42,6 +43,10 @@ export function ecpayConfig() {
     merchantId: env('ECPAY_MERCHANT_ID', '2000132'),
     hashKey: env('ECPAY_HASH_KEY', '5294y06JbISpM5x9'),
     hashIV: env('ECPAY_HASH_IV', 'v77hoKGq4kWxNNIS'),
+    // 退刷／取消授權用的 API
+    actionUrl: env('ECPAY_ACTION_URL', prod
+      ? 'https://payment.ecpay.com.tw/CreditDetail/DoAction'
+      : 'https://payment-stage.ecpay.com.tw/CreditDetail/DoAction'),
     checkoutUrl: env('ECPAY_CHECKOUT_URL', prod
       ? 'https://payment.ecpay.com.tw/Cashier/AioCheckOut/V5'
       : 'https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5'),

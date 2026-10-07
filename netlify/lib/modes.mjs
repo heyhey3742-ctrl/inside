@@ -1,5 +1,5 @@
 // 三種預約方式的「時段」與「計價」規則
-//   periods：早／中／晚時段制（無人咖啡廳）
+//   periods：每個整點都能選入場／出場，依「跨到哪幾個時段」套用早／中／晚方案價（無人咖啡廳）
 //   hourly ：時租制，滿日租價封頂、營業時間外加價、假日起租套裝（HJ 會議室、座位）
 //   consult：免費諮詢，選一個時段（公司設立、參觀）
 import { PERIODS, HOLIDAYS } from './config.mjs';
@@ -22,7 +22,11 @@ export function daySchedule(loc, date) {
 // 這一天有哪些可選的格子
 export function slotsFor(loc, date) {
   if (loc.mode === 'periods') {
-    return PERIODS.map((p) => ({ key: p.id, start: p.start, end: p.end }));
+    const out = [];
+    for (const p of PERIODS) {
+      for (let h = p.start; h < p.end; h++) out.push({ key: 'h' + h, start: h, end: h + 1, period: p.id });
+    }
+    return out;
   }
   const s = daySchedule(loc, date);
   if (!s) return [];
@@ -43,13 +47,13 @@ export function normalizePeriods(ids) {
   return idx.map((i) => PERIODS[i].id);
 }
 
+// 這段時間跨到哪幾個時段（例：10:00–14:00 → 早上、下午）
+export function periodsTouched(start, end) {
+  return PERIODS.filter((p) => p.start < end && p.end > start).map((p) => p.id);
+}
+
 // 從客人送來的資料，取出要預約的格子
 export function selectionFrom(loc, date, body) {
-  if (loc.mode === 'periods') {
-    const keys = normalizePeriods(Array.isArray(body.periods) ? body.periods.map(String) : []);
-    if (!keys) throw new UserError('請選擇連續的時段（早＋晚請改選全天）');
-    return keys;
-  }
   const slots = slotsFor(loc, date);
   if (!slots.length) throw new UserError('這一天不開放預約，請改選其他日期');
   const start = Number(body.start);
@@ -68,10 +72,16 @@ export function rangeOf(loc, date, keys) {
   return { start: Math.min(...slots.map((x) => x.start)), end: Math.max(...slots.map((x) => x.end)) };
 }
 
+export function periodNames(ids) {
+  if (ids.length === PERIODS.length) return '全天';
+  return ids.map((id) => PERIODS.find((p) => p.id === id).name).join('＋');
+}
+
 export function labelFor(loc, keys) {
+  const hs0 = keys.map((k) => Number(k.slice(1)));
   if (loc.mode === 'periods') {
-    if (keys.length === PERIODS.length) return '全天';
-    return keys.map((id) => PERIODS.find((p) => p.id === id).name).join('＋');
+    const s = Math.min(...hs0), e = Math.max(...hs0) + 1;
+    return `${hh(s)}–${hh(e)}（${periodNames(periodsTouched(s, e))}）`;
   }
   const hs = keys.map((k) => Number(k.slice(1)));
   const start = Math.min(...hs), end = Math.max(...hs) + 1;
@@ -79,7 +89,8 @@ export function labelFor(loc, keys) {
 }
 
 // 計價：回傳總金額與明細（明細會顯示在確認頁）
-export function quote(loc, date, keys, people) {
+//   paidPeriods：加訂時，已經付過的時段（不重複收費、也不套用多時段優惠）
+export function quote(loc, date, keys, people, { paidPeriods } = {}) {
   const per = loc.pricing === 'perPerson';
   const times = (n) => (per ? n * people : n);
   const perNote = per && people > 1 ? ` × ${people} 人` : '';
@@ -87,9 +98,19 @@ export function quote(loc, date, keys, people) {
   if (loc.mode === 'consult') return { amount: 0, lines: [{ label: '免費諮詢', amount: 0 }] };
 
   if (loc.mode === 'periods') {
-    const unit = keys.length === 1 ? loc.prices.single[keys[0]] : loc.prices.combos[keys.join('+')];
+    const hs = keys.map((k) => Number(k.slice(1)));
+    let ids = periodsTouched(Math.min(...hs), Math.max(...hs) + 1);
+    if (paidPeriods) {
+      // 加訂：只收還沒付過的時段，各自用單時段價
+      ids = ids.filter((id) => !paidPeriods.includes(id));
+      if (!ids.length) throw new UserError('這段時間已經包含在你的預約裡');
+      const unit = ids.reduce((sum, id) => sum + loc.prices.single[id], 0);
+      return { amount: times(unit), periods: ids, lines: [{ label: `加訂${periodNames(ids)}（單獨計費）${perNote}`, amount: times(unit) }] };
+    }
+    const unit = ids.length === 1 ? loc.prices.single[ids[0]] : loc.prices.combos[ids.join('+')];
     if (unit == null) throw new UserError('這個時段組合沒有提供，請改選其他時段');
-    return { amount: times(unit), lines: [{ label: `${labelFor(loc, keys)}${perNote}`, amount: times(unit) }] };
+    const label = ids.length === 1 ? `${periodNames(ids)}時段` : `${periodNames(ids)}方案`;
+    return { amount: times(unit), periods: ids, lines: [{ label: `${label} ${money(unit)}${perNote}`, amount: times(unit) }] };
   }
 
   // hourly

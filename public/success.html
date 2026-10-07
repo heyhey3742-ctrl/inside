@@ -10,7 +10,7 @@
 </head>
 <body>
 <header class="hero">
-  <div class="brand" id="brand">Hour Jungle</div>
+  <a class="brand" id="brand" href="/">Hour Jungle</a>
   <p>預約完成</p>
 </header>
 <div class="wrap">
@@ -34,8 +34,37 @@
       <button class="btn block" id="extendBtn" type="button"></button>
     </div>
     <div class="card summary"><dl id="info"></dl><div class="total"><span>本筆金額</span><b id="amt"></b></div></div>
+    <div class="card" id="manageBox">
+      <b>需要改期或取消？</b>
+      <p class="muted" style="margin:6px 0 12px;font-size:14px" id="policyText"></p>
+      <div id="manageBtns" style="display:flex;gap:10px">
+        <button class="btn ghost" style="flex:1" type="button" id="btnChange">改期</button>
+        <button class="btn ghost" style="flex:1" type="button" id="btnCancel">取消並退款</button>
+      </div>
+      <form id="manageForm" class="hidden" onsubmit="return false">
+        <div id="dateRow">
+          <label for="newDate">新的日期（時間不變）</label>
+          <input type="date" id="newDate">
+        </div>
+        <label for="phoneTail">為了確認是你本人，請輸入手機末三碼</label>
+        <input id="phoneTail" inputmode="numeric" maxlength="3">
+        <p></p>
+        <div style="display:flex;gap:10px">
+          <button class="btn ghost" style="flex:1" type="button" id="btnBack">返回</button>
+          <button class="btn" style="flex:2" type="button" id="btnConfirm"></button>
+        </div>
+      </form>
+    </div>
     <p class="hint center" id="mailNote"></p>
     <p class="hint center">請把這一頁加入書籤或截圖。之後也可以在首頁用「預約編號＋手機末三碼」查詢預約。</p>
+    <a class="btn ghost block" href="/">回到首頁</a>
+  </div>
+  <div id="cancelled" class="hidden">
+    <div class="card center">
+      <div class="big-icon bad">✕</div>
+      <h2 style="margin:0 0 6px">預約已取消</h2>
+      <p class="muted" id="cancelNote" style="margin:0"></p>
+    </div>
     <a class="btn ghost block" href="/">回到首頁</a>
   </div>
   <div id="wait" class="hidden card center">
@@ -61,6 +90,7 @@ async function load() {
     if (!res.ok) throw new Error(o.error);
     $('#loading').classList.add('hidden');
     if (o.status === 'paid') return render(o);
+    if (o.status === 'cancelled' || o.status === 'cancelling') return renderCancelled(o);
     if (o.status === 'failed') return location.replace('/fail.html?id=' + o.id);
     $('#wait').classList.remove('hidden');
     if (++tries < 15) setTimeout(load, 2000);
@@ -100,6 +130,7 @@ function render(o) {
     info.append(dt, dd);
   }
   $('#amt').textContent = o.amount ? money(o.amount) : '免費';
+  renderManage(o);
   $('#mailNote').textContent = !o.amount ? '' : o.invoiceNo
     ? `電子發票 ${o.invoiceNo} 已開立，通知信寄到 ${o.email}`
     : `電子發票開立後會寄到 ${o.email}`;
@@ -122,6 +153,57 @@ function render(o) {
     if (r.invoiceNo) $('#mailNote').textContent = `電子發票 ${r.invoiceNo} 已開立，通知信寄到 ${r.email}`;
   }, 3000);
 }
+
+function renderCancelled(o) {
+  $('#ok').classList.add('hidden');
+  $('#cancelled').classList.remove('hidden');
+  $('#cancelNote').textContent = `${o.locationName}　${o.date} ${o.slotLabel}` +
+    (o.amount ? `\nNT$ ${o.amount.toLocaleString('zh-TW')} 已退回原信用卡，依發卡銀行作業約 7–14 個工作天入帳。` : '');
+  $('#cancelNote').style.whiteSpace = 'pre-line';
+}
+
+// 改期／取消
+let manageAction = '';
+function renderManage(o) {
+  const p = o.policy;
+  $('#policyText').textContent = `開始前 ${p.changeHours} 小時以前可以自己改期（${p.maxChanges} 次）` +
+    (o.amount ? `，或取消並全額退款` : '，或取消預約') + `。超過時間請聯絡客服。`;
+  $('#btnChange').disabled = !o.canChange;
+  $('#btnCancel').disabled = !o.canCancel;
+  $('#btnCancel').textContent = o.amount ? '取消並退款' : '取消預約';
+  $('#manageBtns').classList.toggle('hidden', !o.canChange && !o.canCancel);
+  if (o.reason) $('#policyText').textContent += `（${o.reason}）`;
+  const d = $('#newDate');
+  d.min = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+}
+function openManage(action) {
+  manageAction = action;
+  $('#manageBtns').classList.add('hidden');
+  $('#manageForm').classList.remove('hidden');
+  $('#dateRow').classList.toggle('hidden', action !== 'change');
+  $('#btnConfirm').textContent = action === 'change' ? '確認改期' : '確認取消';
+}
+$('#btnChange').onclick = () => openManage('change');
+$('#btnCancel').onclick = () => openManage('cancel');
+$('#btnBack').onclick = () => { $('#manageForm').classList.add('hidden'); $('#manageBtns').classList.remove('hidden'); };
+$('#btnConfirm').onclick = async () => {
+  const phone = $('#phoneTail').value.trim();
+  if (manageAction === 'cancel' && !confirm('確定要取消這筆預約嗎？')) return;
+  const b = $('#btnConfirm');
+  b.disabled = true; b.textContent = '處理中…';
+  try {
+    const path = manageAction === 'change' ? '/api/reschedule' : '/api/cancel';
+    const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, phone, date: $('#newDate').value }) });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error);
+    $('#error').classList.add('hidden');
+    $('#manageForm').classList.add('hidden');
+    load();
+  } catch (e) {
+    showErr(e.message || '處理失敗');
+  }
+  b.disabled = false; b.textContent = manageAction === 'change' ? '確認改期' : '確認取消';
+};
 
 async function extend() {
   const b = $('#extendBtn');

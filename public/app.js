@@ -1,8 +1,8 @@
 const $ = (s) => document.querySelector(s);
 const state = {
   cfg: null, step: 1, loc: null, branch: '', people: 1, date: null,
-  avail: [], sel: [],          // periods 模式：選到的時段 id
-  start: null, endSlot: null,  // hourly / consult 模式：選到的小時
+  avail: [],
+  start: null, endSlot: null,  // 選到的入場小時、最後一個小時
   topic: '', quote: null, invType: 'personal', busy: false, line: null,
 };
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
@@ -73,36 +73,17 @@ function units() {
 }
 
 /* ---------- 計價 ---------- */
-const PIDS = () => state.cfg.periods.map((p) => p.id);
 const periodOf = (id) => state.cfg.periods.find((p) => p.id === id);
-function selectedPeriods() {
-  return PIDS().filter((id) => state.sel.includes(id));
-}
-function periodUnit(loc, ids) {
-  if (!ids.length) return 0;
-  return ids.length === 1 ? loc.prices.single[ids[0]] : loc.prices.combos[ids.join('+')];
-}
-function periodLabel(ids) {
-  if (ids.length === state.cfg.periods.length) return '全天';
-  return ids.map((id) => periodOf(id).name).join('＋');
-}
 function hasSelection() {
   if (!state.loc) return false;
-  if (mode() === 'periods') return selectedPeriods().length > 0;
   if (mode() === 'consult') return state.start != null && !!state.topic;
   return state.start != null && !!state.quote;
 }
 function amount() {
   if (!state.loc) return 0;
-  if (mode() === 'periods') {
-    const p = periodUnit(state.loc, selectedPeriods());
-    if (!p) return 0;
-    return state.loc.pricing === 'perRoom' ? p : p * state.people;
-  }
   return state.quote?.amount || 0;
 }
 function selectionLabel() {
-  if (mode() === 'periods') return periodLabel(selectedPeriods());
   if (state.start == null) return '';
   if (mode() === 'consult') return hh(state.start);
   return `${hh(state.start)}–${hh(state.endSlot + 1)}（${state.endSlot + 1 - state.start} 小時）`;
@@ -218,13 +199,13 @@ function setupStep2() {
   $('#hourIntro').classList.toggle('hidden', m !== 'hourly');
   $('#peopleBox').classList.toggle('hidden', m === 'consult');
   $('#topicBox').classList.toggle('hidden', m !== 'consult');
-  $('#periods').classList.toggle('hidden', m !== 'periods');
-  $('#slots').classList.toggle('hidden', m === 'periods');
-  $('#legend').classList.toggle('hidden', m === 'periods');
+  $('#periods').classList.add('hidden');
+  $('#slots').classList.remove('hidden');
+  $('#legend').classList.remove('hidden');
   $('#afterLegend').classList.toggle('hidden', m !== 'hourly');
   $('#timeSummary').classList.toggle('hidden', m === 'consult');
   $('#timeTitle').textContent = m === 'consult' ? '日期與時間' : '日期與時段';
-  $('#slotHint').textContent = m === 'periods' ? '時段（可複選，需連續）'
+  $('#slotHint').textContent = m === 'periods' ? '時間（先點入場時間，再點離場前最後一個小時，依跨到的時段計費）'
     : m === 'consult' ? '時間（每次約 1 小時）' : '時間（先點入場時間，再點最後一個小時）';
   if (m === 'periods') renderPriceTable();
   if (m === 'hourly') {
@@ -275,8 +256,9 @@ function renderPeople() {
 function changePeople(d) {
   state.people = Math.max(1, Math.min(state.loc.maxPeople, state.people + d));
   renderPeople();
-  if (mode() === 'periods') { state.sel = state.sel.filter((id) => fits(id)); renderPeriods(); }
-  else { if (state.start != null && !rangeFits(state.start, state.endSlot)) clearTime(); renderSlots(); updateQuote(); }
+  if (state.start != null && !rangeFits(state.start, state.endSlot)) clearTime();
+  renderSlots();
+  updateQuote();
   refreshBar();
 }
 
@@ -308,14 +290,13 @@ function pickDate(iso) {
 
 async function loadSlots() {
   if (!state.date) { state.date = state.cfg.today; renderDates(); }
-  const box = mode() === 'periods' ? $('#periods') : $('#slots');
+  const box = $('#slots');
   box.innerHTML = '<div class="spinner" style="grid-column:1/-1"></div>';
   try {
     const data = await api(`/api/availability?location=${state.loc.id}&date=${state.date}`);
     if (data.date !== state.date || data.location !== state.loc.id) return;
     state.avail = data.slots;
-    if (mode() === 'periods') { state.sel = state.sel.filter((id) => fits(id)); renderPeriods(); }
-    else renderSlots();
+    renderSlots();
     refreshBar();
   } catch (e) {
     box.innerHTML = '';
@@ -326,74 +307,6 @@ async function loadSlots() {
 function fits(key) {
   const a = state.avail.find((x) => x.key === key);
   return !!a && !a.past && a.remaining >= units();
-}
-
-/* 時段制 */
-function renderPeriods() {
-  const box = $('#periods');
-  box.innerHTML = '';
-  const ids = selectedPeriods();
-  for (const p of state.cfg.periods) {
-    const a = state.avail.find((x) => x.key === p.id) || {};
-    const ok = fits(p.id);
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'period' + (ids.includes(p.id) ? ' sel' : '');
-    b.disabled = !ok;
-    const status = a.past ? '已結束' : !ok ? '額滿' : state.loc.pricing === 'perRoom' ? '可預約' : `剩 ${a.remaining} 位`;
-    b.innerHTML = `${icon(p.icon)}<span class="n">${p.name}</span>
-      <span class="p">$${state.loc.prices.single[p.id]}<small>${status}</small></span>
-      <span class="t">${hh(p.start)} – ${hh(p.end)}</span>`;
-    b.setAttribute('aria-pressed', ids.includes(p.id));
-    b.addEventListener('click', () => togglePeriod(p.id));
-    box.appendChild(b);
-  }
-  if (state.cfg.periods.every((p) => !fits(p.id))) {
-    box.insertAdjacentHTML('beforeend', '<p class="muted" style="margin:4px 0 0">這天已經沒有可預約的時段，請換一天 🙏</p>');
-  }
-  renderCombo();
-}
-
-function renderCombo() {
-  const ids = selectedPeriods();
-  const note = $('#comboNote');
-  if (ids.length > 1) {
-    const sum = ids.reduce((s, id) => s + state.loc.prices.single[id], 0);
-    const price = periodUnit(state.loc, ids);
-    const per = state.loc.pricing === 'perPerson' ? '每人' : '';
-    note.innerHTML = `已套用<b>${periodLabel(ids)}方案${per} $${price}</b>${sum > price ? `，比分開買${per}省 $${sum - price}` : ''}`;
-    note.classList.remove('hidden');
-  } else {
-    note.classList.add('hidden');
-  }
-  $('#tIn').textContent = ids.length ? hh(periodOf(ids[0]).start) : '—';
-  $('#tOut').textContent = ids.length ? hh(periodOf(ids[ids.length - 1]).end) : '—';
-}
-
-function togglePeriod(id) {
-  const all = PIDS();
-  let sel = state.sel.includes(id) ? state.sel.filter((x) => x !== id) : [...state.sel, id];
-  const idx = all.filter((x) => sel.includes(x)).map((x) => all.indexOf(x));
-  if (idx.length > 1 && idx[idx.length - 1] - idx[0] + 1 !== idx.length) {
-    if (!sel.includes(id)) {
-      // 取消中間的時段會斷開 → 只保留前面那一段
-      const cut = all.indexOf(id);
-      sel = sel.filter((x) => all.indexOf(x) < cut);
-    } else {
-      // 早＋晚不連續 → 自動補成全天（中間時段要有空位）
-      const fill = all.slice(idx[0], idx[idx.length - 1] + 1);
-      if (fill.every(fits)) {
-        sel = fill;
-        flash(`早＋晚不連續，已幫你改成${periodLabel(fill)}方案`);
-      } else {
-        sel = [id];
-        flash('時段需要連續，中間的時段已額滿，已改為只選這個時段');
-      }
-    }
-  }
-  state.sel = sel;
-  renderPeriods();
-  refreshBar();
 }
 
 /* 時租制、諮詢：小時格子 */
@@ -423,8 +336,11 @@ function renderSlots() {
       }
       b.className = cls;
       b.disabled = !ok;
-      const sub = s.past ? '已過' : !ok ? '已預約' : state.loc.pricing === 'perPerson' ? `剩 ${s.remaining} 位` : s.after ? '營業時間外' : '可預約';
+      const pname = s.period ? periodOf(s.period).name + '・' : '';
+      const sub = s.past ? '已過' : !ok ? (state.loc.pricing === 'perPerson' ? '額滿' : '已預約')
+        : pname + (state.loc.pricing === 'perPerson' ? `剩 ${s.remaining} 位` : s.after ? '營業時間外' : '可預約');
       b.innerHTML = `${hh(s.start)}<small>${sub}</small>`;
+      if (s.period) b.dataset.period = s.period;
       b.addEventListener('click', () => tapSlot(s.start));
       box.appendChild(b);
     }
@@ -451,7 +367,7 @@ function tapSlot(h) {
 async function updateQuote() {
   state.quote = null;
   refreshBar();
-  if (mode() !== 'hourly' || state.start == null) { renderQuote(); return; }
+  if (mode() === 'consult' || state.start == null) { renderQuote(); return; }
   const req = { location: state.loc.id, date: state.date, start: state.start, end: state.endSlot + 1, people: state.people };
   const key = JSON.stringify(req);
   updateQuote.key = key;
@@ -470,14 +386,14 @@ async function updateQuote() {
 
 function renderQuote() {
   const note = $('#comboNote');
-  if (mode() !== 'hourly' || state.start == null) { note.classList.add('hidden'); return; }
+  if (mode() === 'consult' || state.start == null) { note.classList.add('hidden'); return; }
   note.classList.remove('hidden');
   if (state.quoteError && !state.quote) { note.innerHTML = `⚠️ ${esc(state.quoteError)}`; return; }
   if (!state.quote) { note.textContent = '計算中…'; return; }
   note.innerHTML = state.quote.lines.map((l) => `<div style="display:flex;justify-content:space-between;gap:8px"><span>${esc(l.label)}</span><b>${money(l.amount)}</b></div>`).join('');
 }
 
-function clearTime() { state.sel = []; state.start = null; state.endSlot = null; state.quote = null; state.quoteError = ''; }
+function clearTime() { state.start = null; state.endSlot = null; state.quote = null; state.quoteError = ''; }
 
 /* ---------- 3. 聯絡、發票 ---------- */
 function pickInv(v) {
@@ -508,8 +424,8 @@ function collect() {
       loveCode: $('#loveCode').value.trim(),
     },
   };
-  if (mode() === 'periods') body.periods = selectedPeriods();
-  else { body.start = state.start; body.end = state.endSlot + 1; }
+  body.start = state.start;
+  body.end = state.endSlot + 1;
   if (mode() === 'consult') body.topic = state.topic;
   return body;
 }
@@ -539,10 +455,7 @@ function renderSummary() {
     ['地點', (br ? br.name + ' ' : '') + state.loc.name],
     ['日期', `${b.date}（週${WEEK[d.getUTCDay()]}）`],
   ];
-  if (mode() === 'periods') {
-    const ids = selectedPeriods();
-    rows.push(['時段', periodLabel(ids)], ['入場', hh(periodOf(ids[0]).start)], ['出場', hh(periodOf(ids[ids.length - 1]).end)]);
-  } else if (mode() === 'consult') {
+  if (mode() === 'consult') {
     rows.push(['時間', hh(state.start)], ['項目', state.topic]);
   } else {
     rows.push(['入場', hh(state.start)], ['出場', hh(state.endSlot + 1)]);
@@ -559,7 +472,7 @@ function renderSummary() {
     const dd = document.createElement('dd'); dd.textContent = v;
     dl.append(dt, dd);
   }
-  const lines = mode() === 'hourly' && state.quote ? state.quote.lines : [];
+  const lines = mode() !== 'consult' && state.quote ? state.quote.lines : [];
   $('#lines').innerHTML = lines.map((l) => `<div><span>${esc(l.label)}</span><span>${money(l.amount)}</span></div>`).join('');
   $('#lines').classList.toggle('hidden', !lines.length);
   $('#total').textContent = isFree() ? '免費' : money(amount());

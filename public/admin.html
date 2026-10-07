@@ -36,7 +36,7 @@
       <input type="date" id="fDate">
       <select id="fStatus">
         <option value="">全部狀態</option><option value="paid">已付款</option>
-        <option value="pending">付款中</option><option value="failed">失敗</option>
+        <option value="pending">付款中</option><option value="failed">失敗</option><option value="cancelled">已取消</option>
       </select>
       <button class="btn ghost" id="reload" type="button">重新整理</button>
     </div>
@@ -50,7 +50,7 @@
 const $ = (s) => document.querySelector(s);
 let pw = sessionStorage.getItem('hj-admin') || '';
 let all = [];
-const label = { paid: '已付款', pending: '付款中', failed: '失敗', expired: '逾時' };
+const label = { paid: '已付款', pending: '付款中', failed: '失敗', expired: '逾時', cancelled: '已取消退款', cancelling: '退款中' };
 function err(m) { $('#error').textContent = m || ''; $('#error').classList.toggle('hidden', !m); }
 
 async function load() {
@@ -66,7 +66,7 @@ async function load() {
 function render() {
   const date = $('#fDate').value, st = $('#fStatus').value;
   const list = all.filter((o) => (!date || o.date === date) && (!st || o.status === st));
-  const paid = list.filter((o) => o.status === 'paid');
+  const paid = list.filter((o) => o.status === 'paid');  // 已取消退款的不算營收
   $('#stats').innerHTML = `<div><small>筆數</small><b>${list.length}</b></div><div><small>已付款</small><b>${paid.length}</b></div><div><small>營收</small><b>${money(paid.reduce((s, o) => s + o.amount, 0))}</b></div>`;
   const box = $('#list'); box.innerHTML = list.length ? '' : '<p class="muted">沒有資料</p>';
   for (const o of list) {
@@ -77,7 +77,23 @@ function render() {
     c.querySelector('.t').textContent = `${o.date} ${hh(o.start)}–${hh(o.end)}・${o.locationName}${o.mode === 'consult' ? '' : `・${o.people} 人`}${o.extendOf ? '・加訂' : ''}`;
     c.querySelector('.d').textContent = `${o.customer.name}　${o.customer.phone}　${o.customer.email}`;
     c.querySelector('.m').textContent = `${o.access ? '🔑 密碼 ' + o.access.code + '｜' : ''}${o.id}${o.customer.note ? '｜備註：' + o.customer.note : ''}${o.payment?.simulated ? '｜模擬付款' : ''}`;
-    c.querySelector('.inv').textContent = inv + (o.calendar?.error ? '｜⚠ Google 日曆寫入失敗：' + o.calendar.error : o.calendar?.eventId ? '｜📅 已寫入日曆' : '') + (o.topic ? '｜諮詢：' + o.topic : '') + (o.customer.company ? '｜' + o.customer.company : '');
+    c.querySelector('.inv').textContent = (o.refundError ? '⚠ 退款失敗：' + o.refundError + '｜' : '') + (o.refund?.action ? '已' + o.refund.action + '｜' : '') + (o.invoiceVoidError ? '⚠ ' + o.invoiceVoidError + '｜' : o.invoiceVoid?.voided ? '發票已作廢｜' : '') + (o.history?.length ? '改期：' + o.history.map((h) => h.from + '→' + h.to).join('、') + '｜' : '') + inv + (o.calendar?.error ? '｜⚠ Google 日曆寫入失敗：' + o.calendar.error : o.calendar?.eventId ? '｜📅 已寫入日曆' : '') + (o.topic ? '｜諮詢：' + o.topic : '') + (o.customer.company ? '｜' + o.customer.company : '');
+    if (o.status === 'paid') {
+      const row = document.createElement('div'); row.style.cssText = 'grid-column:1/-1;display:flex;gap:8px;margin-top:6px';
+      const mk = (t, fn) => { const b = document.createElement('button'); b.className = 'btn ghost'; b.style.cssText = 'flex:1;padding:8px'; b.textContent = t; b.onclick = fn; row.appendChild(b); return b; };
+      mk('改期', async () => {
+        const date = prompt('改到哪一天？（格式 2026-10-20，時間不變）', o.date);
+        if (!date) return;
+        const r = await fetch('/api/admin/orders', { method: 'POST', headers: { 'x-admin-password': pw, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: o.id, action: 'reschedule', date }) });
+        const d = await r.json(); if (!r.ok) err(d.error); load();
+      });
+      mk(o.amount ? '取消並退款' : '取消', async () => {
+        if (!confirm(`確定要取消 ${o.customer.name} 的預約${o.amount ? `並退款 NT$ ${o.amount}` : ''}？`)) return;
+        const r = await fetch('/api/admin/orders', { method: 'POST', headers: { 'x-admin-password': pw, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: o.id, action: 'refund' }) });
+        const d = await r.json(); if (!r.ok) err(d.error); load();
+      });
+      c.appendChild(row);
+    }
     if (o.status === 'paid' && !o.invoiceResult?.invoiceNo) {
       const b = document.createElement('button'); b.className = 'btn ghost'; b.textContent = '補開發票'; b.style.gridColumn = '1 / -1';
       b.onclick = async () => {

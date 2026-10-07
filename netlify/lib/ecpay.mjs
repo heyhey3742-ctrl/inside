@@ -66,3 +66,30 @@ export function checkoutForm({ order, tradeNo, origin }) {
   params.CheckMacValue = checkMacValue(params, cfg);
   return { action: cfg.checkoutUrl, params };
 }
+
+// 信用卡退款：先試「放棄授權」（當天還沒請款），不行再「退刷」（已請款）
+export async function refundPayment(order) {
+  const cfg = ecpayConfig();
+  const p = order.payment || {};
+  if (!p.tradeNo || !p.ecpayTradeNo) throw new Error('找不到綠界交易編號');
+  const tries = [];
+  for (const Action of ['N', 'R']) {
+    const params = {
+      MerchantID: cfg.merchantId,
+      MerchantTradeNo: p.tradeNo,
+      TradeNo: p.ecpayTradeNo,
+      Action,
+      TotalAmount: String(order.amount),
+    };
+    params.CheckMacValue = checkMacValue(params, cfg);
+    const res = await fetch(cfg.actionUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(params),
+    });
+    const r = Object.fromEntries(new URLSearchParams(await res.text()));
+    if (r.RtnCode === '1') return { action: Action === 'N' ? '放棄授權' : '退刷', at: new Date().toISOString() };
+    tries.push(`${Action}:${r.RtnMsg || res.status}`);
+  }
+  throw new Error('綠界退款失敗（' + tries.join('、') + '）');
+}
