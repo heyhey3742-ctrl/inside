@@ -77,14 +77,14 @@ const periodOf = (id) => state.cfg.periods.find((p) => p.id === id);
 function hasSelection() {
   if (!state.loc) return false;
   if (mode() === 'consult') return state.start != null && !!state.topic;
-  return state.start != null && !!state.quote;
+  return state.start != null && state.endSlot != null && !!state.quote;
 }
 function amount() {
   if (!state.loc) return 0;
   return state.quote?.amount || 0;
 }
 function selectionLabel() {
-  if (state.start == null) return '';
+  if (state.start == null || state.endSlot == null) return '';
   if (mode() === 'consult') return hh(state.start);
   return `${hh(state.start)}–${hh(state.endSlot + 1)}（${state.endSlot + 1 - state.start} 小時）`;
 }
@@ -103,7 +103,7 @@ function refreshBar() {
   $('#price').textContent = isFree() ? '免費' : money(amount());
   const label = selectionLabel();
   $('#priceLabel').textContent = !state.loc ? '選擇地點開始預約'
-    : !label ? (mode() === 'consult' ? '請選擇時間' : '請選擇時段')
+    : !label ? (mode() === 'consult' ? '請選擇時間' : state.start == null ? '請選擇入場時間' : '請選擇離場時間')
     : label + (state.loc.pricing === 'perPerson' ? ` × ${state.people} 人` : '');
 }
 
@@ -205,8 +205,7 @@ function setupStep2() {
   $('#afterLegend').classList.toggle('hidden', m !== 'hourly');
   $('#timeSummary').classList.toggle('hidden', m === 'consult');
   $('#timeTitle').textContent = m === 'consult' ? '日期與時間' : '日期與時段';
-  $('#slotHint').textContent = m === 'periods' ? '時間（先點入場時間，再點離場前最後一個小時，依跨到的時段計費）'
-    : m === 'consult' ? '時間（每次約 1 小時）' : '時間（先點入場時間，再點最後一個小時）';
+  $('#slotHint').textContent = m === 'consult' ? '時間（每次約 1 小時）' : '① 入場時間';
   if (m === 'periods') renderPriceTable();
   if (m === 'hourly') {
     $('#htable').innerHTML = '<h4 style="margin-top:0">價目表</h4>' +
@@ -316,50 +315,82 @@ function rangeFits(a, b) {
   return true;
 }
 
+function slotSub(s, ok) {
+  const pname = s.period ? periodOf(s.period).name + '・' : '';
+  if (s.past) return '已過';
+  if (!ok) return state.loc.pricing === 'perPerson' ? '額滿' : '已預約';
+  return pname + (state.loc.pricing === 'perPerson' ? `剩 ${s.remaining} 位` : s.after ? '營業時間外' : '可預約');
+}
+
+// 從入場時間往後，最晚可以待到幾點（中間不能有額滿的時段）
+function maxEndFrom(start) {
+  let h = start;
+  while (slotAt(h) && fits(slotAt(h).key)) h++;
+  return h;
+}
+
 function renderSlots() {
   const box = $('#slots');
   box.innerHTML = '';
+  const consult = mode() === 'consult';
   if (!state.avail.length) {
     box.innerHTML = `<p class="muted" style="grid-column:1/-1;margin:0">這天不開放線上預約${state.cfg.supportUrl ? '，假日或特殊需求請聯絡客服' : ''} 🙏</p>`;
   } else if (!state.avail.some((s) => fits(s.key))) {
     box.innerHTML = '<p class="muted" style="grid-column:1/-1;margin:0">這天已經沒有可預約的時間，請換一天 🙏</p>';
   } else {
+    // ① 入場時間
     for (const s of state.avail) {
       const b = document.createElement('button');
       b.type = 'button';
       const ok = fits(s.key);
-      let cls = 'slot' + (s.after ? ' after' : '');
-      if (state.start != null) {
-        const end = state.endSlot ?? state.start;
-        if (s.start === state.start || s.start === end) cls += ' edge';
-        else if (s.start > state.start && s.start < end) cls += ' in';
-      }
-      b.className = cls;
+      b.className = 'slot' + (s.after ? ' after' : '') + (s.start === state.start ? ' edge' : '');
       b.disabled = !ok;
-      const pname = s.period ? periodOf(s.period).name + '・' : '';
-      const sub = s.past ? '已過' : !ok ? (state.loc.pricing === 'perPerson' ? '額滿' : '已預約')
-        : pname + (state.loc.pricing === 'perPerson' ? `剩 ${s.remaining} 位` : s.after ? '營業時間外' : '可預約');
-      b.innerHTML = `${hh(s.start)}<small>${sub}</small>`;
+      b.innerHTML = `${hh(s.start)}<small>${slotSub(s, ok)}</small>`;
       if (s.period) b.dataset.period = s.period;
-      b.addEventListener('click', () => tapSlot(s.start));
+      b.addEventListener('click', () => pickStart(s.start));
       box.appendChild(b);
     }
   }
+  // ② 離場時間：入場後才出現，只列出連續有空位的時間
+  const endBox = $('#endBox');
+  endBox.classList.toggle('hidden', consult || state.start == null);
+  if (!consult && state.start != null) {
+    const ends = $('#endSlots');
+    ends.innerHTML = '';
+    const max = maxEndFrom(state.start);
+    for (let h = state.start + 1; h <= max; h++) {
+      const last = slotAt(h - 1);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'slot' + (state.endSlot === h - 1 ? ' edge' : '');
+      const hours = h - state.start;
+      b.innerHTML = `${hh(h)}<small>共 ${hours} 小時${last.after ? '・含營業時間外' : ''}</small>`;
+      if (last.period) b.dataset.period = last.period;
+      b.addEventListener('click', () => pickEnd(h));
+      ends.appendChild(b);
+    }
+    if (max < (state.avail[state.avail.length - 1]?.end ?? 0)) {
+      ends.insertAdjacentHTML('beforeend', `<p class="muted" style="grid-column:1/-1;margin:2px 0 0;font-size:13px">${hh(max)} 之後已被預約，最晚只能待到 ${hh(max)}</p>`);
+    }
+  }
   $('#tIn').textContent = state.start != null ? hh(state.start) : '—';
-  $('#tOut').textContent = state.endSlot != null ? hh(state.endSlot + 1) : '—';
+  $('#tOut').textContent = state.endSlot != null && !consult ? hh(state.endSlot + 1) : '—';
   renderQuote();
 }
 
-function tapSlot(h) {
-  if (mode() === 'consult') {
-    state.start = h; state.endSlot = h;
-  } else if (state.start == null || state.endSlot !== state.start || h < state.start) {
-    // 第一下＝入場；第二下（較晚的時段）＝最後一個小時；再點就重新選
-    state.start = h; state.endSlot = h;
-  } else if (h !== state.start) {
-    if (rangeFits(state.start, h)) state.endSlot = h;
-    else { state.start = h; state.endSlot = h; flash('中間有已被預約的時段，已幫你從這個時間重新開始選'); }
+function pickStart(h) {
+  state.start = h;
+  if (mode() === 'consult') state.endSlot = h;
+  else if (state.endSlot == null || state.endSlot < h || !rangeFits(h, state.endSlot)) state.endSlot = null;
+  renderSlots();
+  updateQuote();
+  if (mode() !== 'consult' && state.endSlot == null) {
+    $('#endBox').scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
+}
+
+function pickEnd(h) {
+  state.endSlot = h - 1;
   renderSlots();
   updateQuote();
 }
@@ -367,7 +398,7 @@ function tapSlot(h) {
 async function updateQuote() {
   state.quote = null;
   refreshBar();
-  if (mode() === 'consult' || state.start == null) { renderQuote(); return; }
+  if (mode() === 'consult' || state.start == null || state.endSlot == null) { renderQuote(); return; }
   const req = { location: state.loc.id, date: state.date, start: state.start, end: state.endSlot + 1, people: state.people };
   const key = JSON.stringify(req);
   updateQuote.key = key;
@@ -387,6 +418,7 @@ async function updateQuote() {
 function renderQuote() {
   const note = $('#comboNote');
   if (mode() === 'consult' || state.start == null) { note.classList.add('hidden'); return; }
+  if (state.endSlot == null) { note.classList.remove('hidden'); note.textContent = '請選擇離場時間'; return; }
   note.classList.remove('hidden');
   if (state.quoteError && !state.quote) { note.innerHTML = `⚠️ ${esc(state.quoteError)}`; return; }
   if (!state.quote) { note.textContent = '計算中…'; return; }
