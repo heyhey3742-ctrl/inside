@@ -2,7 +2,7 @@
 export default {
   id: 'cafe',
   brand: {
-    name: 'Hour Jungle',
+    name: 'Hour café',
     tagline: '無人自助空間・線上預約',
     footer: '台灣維百股份有限公司中山分公司・Hour Jungle Co-Working',
     icon: 'leaf',

@@ -4,7 +4,7 @@
 
 | 網站 | `SITE` | 內容 | 設定檔 |
 |---|---|---|---|
-| 無人咖啡廳 | `cafe`（預設） | 早／中／晚時段制、入場密碼、加訂提醒 | `netlify/lib/sites/cafe.mjs` |
+| Hour café（無人咖啡廳） | `cafe`（預設） | 早／中／晚時段制、入場密碼、加訂提醒 | `netlify/lib/sites/cafe.mjs` |
 | Hour Jungle 各館 | `hj` | 會議室／教室時租、共同工作空間、獨立辦公室參觀、公司設立諮詢、Google 日曆同步 | `netlify/lib/sites/hj.mjs` |
 
 改一次程式，兩個網站都會更新；品牌、價格、LINE 官方帳號、綠界帳號各自用自己的環境變數。
