@@ -7,9 +7,9 @@ const map = (q) => `https://www.google.com/maps/search/?api=1&query=${encodeURIC
 // 各館營業時間：open／close 是營業時間，lateUntil 是營業時間外最晚可預約到幾點
 // weekend 為 null 代表假日不開放；★ 為尚未確認的預設值
 const HOURS = {
-  'tpe-xinyi': { weekday: { open: 9, close: 18 }, weekend: null, lateFrom: 8, lateUntil: 22 },   // ★ 營業時間
-  'txg-dazhong': { weekday: { open: 9, close: 18 }, weekend: { open: 9, close: 18 }, lateFrom: 8, lateUntil: 22 }, // ★
-  'tnn-dongning': { weekday: { open: 9, close: 18 }, weekend: { open: 9, close: 18 }, lateFrom: 8, lateUntil: 22 }, // 六日預約制（★ 假日時段）
+  'tpe-xinyi': { weekday: { open: 9, close: 19 }, weekend: null, lateFrom: 8, lateUntil: 22 },
+  'txg-dazhong': { weekday: { open: 9, close: 18 }, weekend: { open: 9, close: 18 }, lateFrom: 8, lateUntil: 22 }, // ★ 假日時段
+  'tnn-dongning': { weekday: { open: 9, close: 18 }, weekend: { open: 9, close: 22 }, lateFrom: 8, lateUntil: 22 }, // 六日預約制 9–22
   'tnn-zhongshan': { weekday: { open: 9, close: 18 }, weekend: { open: 12, close: 18 }, lateFrom: 8, lateUntil: 22 },
   'tnn-chongxue': { weekday: { open: 9, close: 19 }, weekend: null, lateFrom: 9, lateUntil: 19 },  // 六日休息
 };
@@ -17,7 +17,7 @@ const HOURS = {
 // 會議室／教室
 //   rate 平日時租、dayRate 日租（滿額封頂）
 //   afterRate 營業時間外每小時、afterBlock 營業時間外套裝（例：3 小時 $5,500）
-//   weekendBlock 假日 N 小時套裝，extraRate 為超過後每小時（★ 預設＝套裝均價）
+//   weekendBlock 假日 N 小時套裝，extraRate 為超過後每小時（＝該場地假日每小時價：套裝價 ÷ 時數）
 //   weekendAfterRate 假日營業時間外每小時
 //   keyword：分館日曆裡，標題含這個字的活動才算佔用這間
 function room({ id, branch, name, keyword, people, image, rate, dayRate, afterRate, afterBlock, weekendBlock, weekendAfterRate }) {
@@ -48,7 +48,7 @@ function room({ id, branch, name, keyword, people, image, rate, dayRate, afterRa
 }
 
 // 共同工作空間：每人時租，滿日租價封頂；可加甜點優惠套裝
-function seats({ id, branch, rate, dayRate, monthRate, dessert, weekend, image }) {
+function seats({ id, branch, rate, dayRate, monthRate, dessert, weekend, capacity = 20, image }) {
   const h = HOURS[branch];
   const day = (w) => ({ ...w, bookFrom: w.open, bookUntil: w.close, rate, dayRate,
     packages: dessert ? [{ name: '低消甜點優惠', hours: 3, price: dessert }] : [] });
@@ -57,7 +57,7 @@ function seats({ id, branch, rate, dayRate, monthRate, dessert, weekend, image }
     desc: `開放式座位，時租 $${rate}、日租 $${dayRate}${monthRate ? `，月租 ${monthRate}（請洽客服）` : ''}。`,
     image,
     pricing: 'perPerson',
-    capacity: 20, // ★ 每館座位數
+    capacity, // 每館座位數
     maxPeople: 10,
     schedule: { weekday: day(h.weekday), weekend: weekend && h.weekend ? day(h.weekend) : null },
   };
@@ -126,29 +126,29 @@ export default {
   holidays: ['2026-10-09', '2026-10-10', '2027-01-01'],
   branches: [
     // calendarEnv：這館的 Google 日曆 ID 放在哪個環境變數（同一個 Gmail 底下，每館一本日曆）
-    { id: 'tpe-xinyi', name: '台北信義安和館', city: '台北', address: '台北市大安區', mapUrl: map('Hour Jungle 信義安和館'), calendarEnv: 'GCAL_XINYI' },
-    { id: 'txg-dazhong', name: '台中大忠館', city: '台中', address: '台中市', mapUrl: map('Hour Jungle 台中大忠館'), calendarEnv: 'GCAL_DAZHONG' },
-    { id: 'tnn-dongning', name: '台南東寧館', city: '台南', address: '台南市東區', mapUrl: map('Hour Jungle 台南東寧館'), calendarEnv: 'GCAL_DONGNING' },
-    { id: 'tnn-zhongshan', name: '台南中山館', city: '台南', address: '台南市中西區', mapUrl: map('Hour Jungle 台南中山館'), calendarEnv: 'GCAL_ZHONGSHAN' },
-    { id: 'tnn-chongxue', name: '台南崇學館', city: '台南', address: '台南市東區', mapUrl: map('Hour Jungle 台南崇學館'), calendarEnv: 'GCAL_CHONGXUE' },
+    { id: 'tpe-xinyi', name: '台北信義安和館', city: '台北', address: '台北市大安區信義路四段170號3樓', mapUrl: map('台北市大安區信義路四段170號'), calendarEnv: 'GCAL_XINYI' },
+    { id: 'txg-dazhong', name: '台中大忠館', city: '台中', address: '台中市', mapUrl: map('Hour Jungle 台中大忠館'), calendarEnv: 'GCAL_DAZHONG' }, // ★ 地址
+    { id: 'tnn-dongning', name: '台南東寧館', subtitle: 'Hour Eureka', city: '台南', address: '臺南市東區東寧路429號2樓', mapUrl: map('臺南市東區東寧路429號'), calendarEnv: 'GCAL_DONGNING' },
+    { id: 'tnn-zhongshan', name: '台南中山館', subtitle: 'Hour Jungle Café 甜點咖啡廳', city: '台南', address: '臺南市中西區中山路193號（近台南火車站）', mapUrl: map('臺南市中西區中山路193號'), calendarEnv: 'GCAL_ZHONGSHAN' },
+    { id: 'tnn-chongxue', name: '台南崇學館', city: '台南', address: '臺南市東區崇學路165號7樓', mapUrl: map('臺南市東區崇學路165號'), calendarEnv: 'GCAL_CHONGXUE' },
   ],
   locations: [
     // 台北信義安和館
-    seats({ id: 'xinyi-seat', branch: 'tpe-xinyi', rate: 100, dayRate: 350, monthRate: '$3,675 起', image: '/img/hj/xinyi-seat.jpg' }),
+    seats({ id: 'xinyi-seat', branch: 'tpe-xinyi', rate: 100, dayRate: 350, monthRate: '$3,675 起', capacity: 30, image: '/img/hj/xinyi-seat.jpg' }),
     // 不開放假日；非營業時間 3 小時 $5,500
     room({ id: 'xinyi-room', branch: 'tpe-xinyi', name: '會議室', keyword: '會議室', people: '6-8', image: '/img/hj/xinyi-room.jpg',
       rate: 450, dayRate: null, afterBlock: { hours: 3, price: 5500, extraRate: 1800 } }),
     office({ id: 'xinyi-office', branch: 'tpe-xinyi', people: '3–6', priceNote: '日租 $1,750、月租 $21,000 起', image: '/img/hj/xinyi-office.jpg' }),
 
     // 台中大忠館
-    seats({ id: 'dazhong-seat', branch: 'txg-dazhong', rate: 80, dayRate: 350, monthRate: '$3,000', image: '/img/hj/dazhong-seat.jpg' }),
-    room({ id: 'dazhong-room', branch: 'txg-dazhong', name: '會議室', keyword: '會議室', people: '10-15', image: '/img/hj/dazhong-room.jpg', // ★ 容納人數
+    seats({ id: 'dazhong-seat', branch: 'txg-dazhong', rate: 80, dayRate: 350, monthRate: '$3,000', capacity: 20 /* ★ 座位數 */, image: '/img/hj/dazhong-seat.jpg' }),
+    room({ id: 'dazhong-room', branch: 'txg-dazhong', name: '會議室', keyword: '會議室', people: '10-12', image: '/img/hj/dazhong-room.jpg',
       rate: 380, dayRate: 2000, afterRate: 550,
       weekendBlock: { hours: 3, price: 1600, extraRate: 533 }, weekendAfterRate: 800 }),
     office({ id: 'dazhong-office', branch: 'txg-dazhong', people: '4–12', priceNote: '月租 $13,500 起', image: '/img/hj/dazhong-office.jpg' }),
 
     // 台南東寧館
-    seats({ id: 'dongning-seat', branch: 'tnn-dongning', rate: 80, dayRate: 350, monthRate: '$3,490', dessert: 150, image: '/img/hj/dongning-seat.jpg' }),
+    seats({ id: 'dongning-seat', branch: 'tnn-dongning', rate: 80, dayRate: 350, monthRate: '$3,490', dessert: 150, capacity: 20, image: '/img/hj/dongning-seat.jpg' }),
     room({ id: 'dongning-room', branch: 'tnn-dongning', name: '會議室', keyword: '會議室', people: '10-15', image: '/img/hj/dongning-room.jpg',
       rate: 400, dayRate: 2400, afterRate: 500,
       weekendBlock: { hours: 3, price: 1500, extraRate: 500 } }),
@@ -157,14 +157,14 @@ export default {
       weekendBlock: { hours: 2, price: 1600, extraRate: 800 }, weekendAfterRate: 800 }),
 
     // 台南中山館
-    seats({ id: 'zhongshan-seat', branch: 'tnn-zhongshan', rate: 80, dayRate: 350, monthRate: '$3,490', dessert: 130, weekend: true, image: '/img/hj/zhongshan-seat.jpg' }),
+    seats({ id: 'zhongshan-seat', branch: 'tnn-zhongshan', rate: 80, dayRate: 350, monthRate: '$3,490', dessert: 130, weekend: true, capacity: 26, image: '/img/hj/zhongshan-seat.jpg' }),
     room({ id: 'zhongshan-room', branch: 'tnn-zhongshan', name: '會議室', keyword: '會議室', people: '10-15', image: '/img/hj/zhongshan-room.jpg',
       rate: 400, dayRate: 2400, afterRate: 600,
       weekendBlock: { hours: 3, price: 1500, extraRate: 500 } }),
     office({ id: 'zhongshan-office', branch: 'tnn-zhongshan', people: '3–5', priceNote: '時租 $300、日租 $1,200 起、月租 $14,500 起', image: '/img/hj/zhongshan-office.jpg' }),
 
     // 台南崇學館
-    seats({ id: 'chongxue-seat', branch: 'tnn-chongxue', rate: 60, dayRate: 250, monthRate: '$3,990', image: '/img/hj/chongxue-seat.jpg' }),
+    seats({ id: 'chongxue-seat', branch: 'tnn-chongxue', rate: 60, dayRate: 250, monthRate: '$3,990', capacity: 30, image: '/img/hj/chongxue-seat.jpg' }),
     // 六日休息（官網的假日 3 小時 $1,200 暫不開放線上預約）
     room({ id: 'chongxue-room', branch: 'tnn-chongxue', name: '會議室', keyword: '會議室', people: '4-6', image: '/img/hj/chongxue-room.jpg',
       rate: 300, dayRate: 1500 }),

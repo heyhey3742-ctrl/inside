@@ -182,7 +182,7 @@ function renderLocations() {
     b.innerHTML = `
       <img src="${esc(loc.image)}" alt="">
       <div class="body">
-        ${br ? `<div class="branch">${esc(br.name)}</div>` : ''}
+        ${br ? `<div class="branch">${esc(br.name)}${br.subtitle ? '・' + esc(br.subtitle) : ''}</div>` : ''}
         <h3><span>${esc(loc.name)}</span><b>${esc(price)}</b></h3>
         <p>${esc(loc.desc)}</p>
         ${table}

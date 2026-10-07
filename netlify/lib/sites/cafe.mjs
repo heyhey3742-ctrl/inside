@@ -50,8 +50,8 @@ export default {
       mode: 'periods',
       name: '共享座位',
       desc: '開放式辦公座位，含 Wi‑Fi、插座、茶水，適合遠端工作、讀書。',
-      address: '台北市中山區',
-      mapUrl: 'https://www.google.com/maps/search/?api=1&query=Hour+Jungle+中山',
+      address: '臺南市中西區中山路193號',
+      mapUrl: 'https://www.google.com/maps/search/?api=1&query=%E8%87%BA%E5%8D%97%E5%B8%82%E4%B8%AD%E8%A5%BF%E5%8D%80%E4%B8%AD%E5%B1%B1%E8%B7%AF193%E8%99%9F',
       image: '/img/desk.svg',
       pricing: 'perPerson', // 每人計價；capacity 是每個時段最多幾個座位
       capacity: 20,
@@ -70,8 +70,8 @@ export default {
       mode: 'periods',
       name: '會議室',
       desc: '6–8 人會議室，含大螢幕、白板、Wi‑Fi，適合會議、面試、小型講座。',
-      address: '台北市中山區',
-      mapUrl: 'https://www.google.com/maps/search/?api=1&query=Hour+Jungle+中山',
+      address: '臺南市中西區中山路193號',
+      mapUrl: 'https://www.google.com/maps/search/?api=1&query=%E8%87%BA%E5%8D%97%E5%B8%82%E4%B8%AD%E8%A5%BF%E5%8D%80%E4%B8%AD%E5%B1%B1%E8%B7%AF193%E8%99%9F',
       image: '/img/meeting.svg',
       pricing: 'perRoom', // 整間包場（價格為示意，請換成實際價格）
       capacity: 1,
