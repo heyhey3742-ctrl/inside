@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>預約後台</title>
+<link rel="icon" href="/img/icon.svg">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .wrap { max-width: 900px; }
+  .tools { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tools input, .tools select { width: auto; flex: 1; min-width: 140px; }
+  .o { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; }
+  .o .t { font-weight: 700; }
+  .tag { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--full); }
+  .tag.paid { background: var(--brand-soft); color: var(--brand); }
+  .tag.failed { background: var(--warn-soft); color: var(--warn); }
+  .o small { color: var(--muted); grid-column: 1 / -1; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+  .stats div { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  .stats b { display: block; font-size: 20px; }
+  .stats small { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top"><div class="logo">HJ</div><div><h1>預約後台</h1><small><a href="/qr.html">產生 QR Code</a></small></div></header>
+  <form id="login" class="card">
+    <label for="pw" style="margin-top:0">管理密碼</label>
+    <input id="pw" type="password" autocomplete="current-password">
+    <p></p><button class="btn block">登入</button>
+  </form>
+  <div id="main" class="hidden">
+    <div class="tools">
+      <input type="date" id="fDate">
+      <select id="fStatus">
+        <option value="">全部狀態</option><option value="paid">已付款</option>
+        <option value="pending">付款中</option><option value="failed">失敗</option>
+      </select>
+      <button class="btn ghost" id="reload" type="button">重新整理</button>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div id="list"></div>
+  </div>
+  <div id="error" class="error hidden"></div>
+</div>
+<script src="/pay.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+let pw = sessionStorage.getItem('hj-admin') || '';
+let all = [];
+const label = { paid: '已付款', pending: '付款中', failed: '失敗', expired: '逾時' };
+function err(m) { $('#error').textContent = m || ''; $('#error').classList.toggle('hidden', !m); }
+
+async function load() {
+  err('');
+  const res = await fetch('/api/admin/orders', { headers: { 'x-admin-password': pw } });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) { sessionStorage.removeItem('hj-admin'); $('#login').classList.remove('hidden'); $('#main').classList.add('hidden'); return err(d.error); }
+  sessionStorage.setItem('hj-admin', pw);
+  $('#login').classList.add('hidden'); $('#main').classList.remove('hidden');
+  all = d.orders.map((o) => ({ ...o, status: o.status === 'pending' && o.holdUntil < Date.now() ? 'expired' : o.status }));
+  render();
+}
+function render() {
+  const date = $('#fDate').value, st = $('#fStatus').value;
+  const list = all.filter((o) => (!date || o.date === date) && (!st || o.status === st));
+  const paid = list.filter((o) => o.status === 'paid');
+  $('#stats').innerHTML = `<div><small>筆數</small><b>${list.length}</b></div><div><small>已付款</small><b>${paid.length}</b></div><div><small>營收</small><b>${money(paid.reduce((s, o) => s + o.amount, 0))}</b></div>`;
+  const box = $('#list'); box.innerHTML = list.length ? '' : '<p class="muted">沒有資料</p>';
+  for (const o of list) {
+    const c = document.createElement('div'); c.className = 'card o';
+    const inv = o.invoiceResult?.invoiceNo ? '發票 ' + o.invoiceResult.invoiceNo : o.invoiceError ? '⚠ 發票失敗：' + o.invoiceError : o.status === 'paid' ? '發票處理中' : '';
+    c.innerHTML = `<span class="t"></span><span class="tag ${o.status}">${label[o.status] || o.status}</span>
+      <span class="d"></span><b>${money(o.amount)}</b><small class="m"></small><small class="inv"></small>`;
+    c.querySelector('.t').textContent = `${o.date} ${hh(o.start)}–${hh(o.end)}・${o.locationName}・${o.people} 人`;
+    c.querySelector('.d').textContent = `${o.customer.name}　${o.customer.phone}　${o.customer.email}`;
+    c.querySelector('.m').textContent = `${o.id}${o.customer.note ? '｜備註：' + o.customer.note : ''}${o.payment?.simulated ? '｜模擬付款' : ''}`;
+    c.querySelector('.inv').textContent = inv;
+    if (o.status === 'paid' && !o.invoiceResult?.invoiceNo) {
+      const b = document.createElement('button'); b.className = 'btn ghost'; b.textContent = '補開發票'; b.style.gridColumn = '1 / -1';
+      b.onclick = async () => {
+        b.disabled = true;
+        const r = await fetch('/api/admin/orders', { method: 'POST', headers: { 'x-admin-password': pw, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: o.id }) });
+        const d = await r.json(); if (!r.ok) err(d.error); load();
+      };
+      c.appendChild(b);
+    }
+    box.appendChild(c);
+  }
+}
+$('#login').addEventListener('submit', (e) => { e.preventDefault(); pw = $('#pw').value; load(); });
+$('#reload').addEventListener('click', load);
+$('#fDate').addEventListener('change', render);
+$('#fStatus').addEventListener('change', render);
+if (pw) load();
+</script>
+</body>
+</html>

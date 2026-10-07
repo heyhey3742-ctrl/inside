@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f6b46">
+<link rel="icon" href="/img/icon.svg">
+<link rel="stylesheet" href="/app.css">
+<title>預約完成</title>
+</head>
+<body>
+<div class="wrap">
+  <div id="loading" class="spinner"></div>
+  <div id="ok" class="hidden">
+    <div class="big-icon ok">✓</div>
+    <h2 class="center">預約完成，付款成功！</h2>
+    <p class="center muted" id="mailNote"></p>
+    <div class="card summary"><dl id="info"></dl><div class="total"><span>已付金額</span><b id="amt"></b></div></div>
+    <p class="hint center">請截圖保存此畫面，入場時出示預約編號即可。</p>
+    <a class="btn block" href="/">再預約一筆</a>
+  </div>
+  <div id="wait" class="hidden center">
+    <div class="spinner"></div>
+    <p class="muted">正在跟銀行確認付款結果，請稍候…</p>
+  </div>
+  <div id="error" class="error hidden"></div>
+</div>
+<script src="/pay.js"></script>
+<script>
+const id = new URLSearchParams(location.search).get('id');
+const $ = (s) => document.querySelector(s);
+let tries = 0;
+async function load() {
+  try {
+    const res = await fetch('/api/order?id=' + encodeURIComponent(id || ''));
+    const o = await res.json();
+    if (!res.ok) throw new Error(o.error);
+    $('#loading').classList.add('hidden');
+    if (o.status === 'paid') return render(o);
+    if (o.status === 'failed') return location.replace('/fail.html?id=' + o.id);
+    $('#wait').classList.remove('hidden');
+    if (++tries < 10) setTimeout(load, 2000);
+    else { $('#wait').classList.add('hidden'); showErr('尚未收到付款結果。若已扣款，請稍後重新整理，或聯繫我們並提供預約編號 ' + o.id); }
+  } catch (e) { $('#loading').classList.add('hidden'); showErr(e.message || '查無預約'); }
+}
+function showErr(m) { const e = $('#error'); e.textContent = m; e.classList.remove('hidden'); }
+function render(o) {
+  $('#wait').classList.add('hidden');
+  $('#ok').classList.remove('hidden');
+  $('#mailNote').textContent = o.invoiceNo
+    ? '電子發票 ' + o.invoiceNo + ' 已開立，通知信寄到 ' + o.email
+    : '電子發票開立後會寄到 ' + o.email;
+  const rows = [['預約編號', o.id], ['地點', o.locationName], ['日期', o.date], ['入場', hh(o.start)], ['出場', hh(o.end)], ['人數', o.people + ' 人']];
+  for (const [k, v] of rows) {
+    const dt = document.createElement('dt'); dt.textContent = k;
+    const dd = document.createElement('dd'); dd.textContent = v;
+    $('#info').append(dt, dd);
+  }
+  $('#amt').textContent = money(o.amount);
+  if (!o.invoiceNo && tries++ < 6) setTimeout(async () => {
+    const r = await fetch('/api/order?id=' + o.id).then((r) => r.json()).catch(() => ({}));
+    if (r.invoiceNo) $('#mailNote').textContent = '電子發票 ' + r.invoiceNo + ' 已開立，通知信寄到 ' + r.email;
+  }, 3000);
+}
+load();
+</script>
+</body>
+</html>

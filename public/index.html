@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hour Jungle 預約</title>
+<meta name="theme-color" content="#1f6b46">
+<link rel="icon" href="/img/icon.svg">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="logo">HJ</div>
+    <div><h1>Hour Jungle 中山</h1><small>線上預約・刷卡付款・電子發票</small></div>
+  </header>
+  <div class="steps" id="steps"><span></span><span></span><span></span><span></span></div>
+
+  <!-- 1. 地點 -->
+  <section id="step1">
+    <h2>選擇地點</h2>
+    <div id="locations"><div class="spinner"></div></div>
+  </section>
+
+  <!-- 2. 人數、日期、時段 -->
+  <section id="step2" class="hidden">
+    <h2>人數與時段</h2>
+    <div class="card">
+      <label style="margin-top:0">人數</label>
+      <div class="stepper">
+        <button type="button" id="peopleMinus" aria-label="減少">−</button>
+        <output id="people">1</output>
+        <button type="button" id="peoplePlus" aria-label="增加">＋</button>
+      </div>
+      <p class="hint" id="peopleHint" style="margin:8px 0 0"></p>
+    </div>
+    <div class="card">
+      <label style="margin-top:0">日期</label>
+      <div class="dates" id="dates"></div>
+      <div class="more-date">其他日期 <input type="date" id="datePicker"></div>
+      <label>時段　<span class="muted" style="font-size:13px">先點入場時間，再點最後一個小時</span></label>
+      <div class="slots" id="slots"></div>
+      <div class="legend"><span><i style="background:var(--brand)"></i>已選</span><span><i style="background:var(--full)"></i>額滿／已過</span></div>
+      <div class="time-summary">
+        <div><small>入場時間</small><b id="tIn">—</b></div>
+        <div><small>出場時間</small><b id="tOut">—</b></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. 聯絡資料與發票 -->
+  <section id="step3" class="hidden">
+    <h2>聯絡資料</h2>
+    <form class="card" id="form" autocomplete="on" onsubmit="return false">
+      <label for="name" style="margin-top:0">姓名</label>
+      <input id="name" name="name" autocomplete="name" required>
+      <label for="phone">手機</label>
+      <input id="phone" name="tel" type="tel" inputmode="tel" autocomplete="tel" placeholder="0912345678" required>
+      <label for="email">Email（預約確認與電子發票會寄到這裡）</label>
+      <input id="email" name="email" type="email" inputmode="email" autocomplete="email" required>
+      <label for="note">備註（選填）</label>
+      <textarea id="note" maxlength="200" placeholder="例如：需要投影線、會晚 10 分鐘到"></textarea>
+    </form>
+    <h2>發票</h2>
+    <div class="card">
+      <div class="seg" id="invType">
+        <button type="button" data-v="personal" class="sel">會員載具</button>
+        <button type="button" data-v="mobile">手機條碼</button>
+        <button type="button" data-v="company">公司統編</button>
+        <button type="button" data-v="donate">捐贈</button>
+      </div>
+      <div data-inv="personal"><p class="hint" style="margin:10px 0 0">發票存在綠界會員載具，開立後寄到你的 Email。</p></div>
+      <div data-inv="mobile" class="hidden">
+        <label for="carrier">手機條碼</label>
+        <input id="carrier" placeholder="/ABC1234" autocapitalize="characters" maxlength="8">
+      </div>
+      <div data-inv="company" class="hidden">
+        <label for="taxId">統一編號</label>
+        <input id="taxId" inputmode="numeric" maxlength="8" placeholder="12345678">
+        <label for="title">公司抬頭</label>
+        <input id="title" autocomplete="organization">
+        <label for="addr">地址（選填）</label>
+        <input id="addr" autocomplete="street-address">
+      </div>
+      <div data-inv="donate" class="hidden">
+        <label for="loveCode">捐贈碼</label>
+        <input id="loveCode" inputmode="numeric" maxlength="7" placeholder="3–7 碼數字">
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. 確認 -->
+  <section id="step4" class="hidden">
+    <h2>確認預約</h2>
+    <div class="card summary">
+      <dl id="summary"></dl>
+      <div class="total"><span>應付金額</span><b id="total"></b></div>
+    </div>
+    <p class="hint">按下付款後會前往綠界 ECPay 安全刷卡頁面。付款完成前，時段會為你保留 <span id="holdMin">20</span> 分鐘。</p>
+  </section>
+
+  <div id="error" class="error hidden"></div>
+  <footer>台灣維百股份有限公司中山分公司・Hour Jungle Co-Working</footer>
+</div>
+
+<div class="bar">
+  <div class="in">
+    <button class="btn ghost hidden" id="back" type="button">上一步</button>
+    <div class="price"><span id="priceLabel">小計</span><b id="price">NT$ 0</b></div>
+    <button class="btn" id="next" type="button" disabled>下一步</button>
+  </div>
+</div>
+
+<script src="/pay.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

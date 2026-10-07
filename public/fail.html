@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f6b46">
+<link rel="icon" href="/img/icon.svg">
+<link rel="stylesheet" href="/app.css">
+<title>付款未完成</title>
+</head>
+<body>
+<div class="wrap">
+  <div class="big-icon bad">!</div>
+  <h2 class="center">付款未完成</h2>
+  <p class="center muted" id="reason">這次付款沒有成功，卡片不會被扣款。</p>
+  <div class="card summary hidden" id="box"><dl id="info"></dl><div class="total"><span>應付金額</span><b id="amt"></b></div></div>
+  <div id="error" class="error hidden"></div>
+  <button class="btn block hidden" id="retry">重新付款</button>
+  <p></p>
+  <a class="btn ghost block" href="/">重新預約</a>
+</div>
+<script src="/pay.js"></script>
+<script>
+const q = new URLSearchParams(location.search);
+const id = q.get('id');
+const $ = (s) => document.querySelector(s);
+const reasons = { cancel: '你取消了付款。', verify: '付款資料驗證失敗，請重新付款。', notfound: '找不到這筆預約。' };
+const r = q.get('reason');
+if (r) $('#reason').textContent = (reasons[r] || ('原因：' + r)) + ' 卡片不會被扣款。';
+function showErr(m) { const e = $('#error'); e.textContent = m; e.classList.remove('hidden'); }
+(async () => {
+  if (!id) return;
+  const res = await fetch('/api/order?id=' + encodeURIComponent(id));
+  const o = await res.json();
+  if (!res.ok) return;
+  if (o.status === 'paid') return location.replace('/success.html?id=' + o.id);
+  const rows = [['預約編號', o.id], ['地點', o.locationName], ['日期', o.date], ['時間', hh(o.start) + '–' + hh(o.end)], ['人數', o.people + ' 人']];
+  for (const [k, v] of rows) {
+    const dt = document.createElement('dt'); dt.textContent = k;
+    const dd = document.createElement('dd'); dd.textContent = v;
+    $('#info').append(dt, dd);
+  }
+  $('#amt').textContent = money(o.amount);
+  $('#box').classList.remove('hidden');
+  $('#retry').classList.remove('hidden');
+})();
+$('#retry').addEventListener('click', async (e) => {
+  e.target.disabled = true; e.target.textContent = '處理中…';
+  try {
+    const res = await fetch('/api/retry-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error);
+    submitToECPay(d.form);
+  } catch (err) {
+    showErr(err.message || '重新付款失敗');
+    e.target.disabled = false; e.target.textContent = '重新付款';
+  }
+});
+window.addEventListener('pageshow', (e) => { if (e.persisted) { const b = $('#retry'); b.disabled = false; b.textContent = '重新付款'; } });
+</script>
+</body>
+</html>

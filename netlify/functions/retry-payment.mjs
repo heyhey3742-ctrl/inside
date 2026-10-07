@@ -1,0 +1,12 @@
+import { retryOrder } from '../lib/booking.mjs';
+import { checkoutForm, tradeNoFor } from '../lib/ecpay.mjs';
+import { json, handle, originOf } from '../lib/http.mjs';
+
+export default handle(async (req) => {
+  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+  const { id } = await req.json();
+  const order = await retryOrder(String(id || ''));
+  const form = checkoutForm({ order, tradeNo: tradeNoFor(order.id, order.attempts), origin: originOf(req) });
+  return json({ orderId: order.id, amount: order.amount, form });
+});
+export const config = { path: '/api/retry-payment' };
